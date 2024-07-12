@@ -24,7 +24,7 @@ import argparse
 import logging
 import sys
 
-from eth_pretty_events import __version__
+from eth_pretty_events import __version__, event_parser
 
 __author__ = "Guillermo M. Narvaja"
 __copyright__ = "Guillermo M. Narvaja"
@@ -40,20 +40,19 @@ _logger = logging.getLogger(__name__)
 # when using this Python module as a library.
 
 
-def fib(n):
-    """Fibonacci example function
+def load_events(paths):
+    """Loads all the events found in .json in the provided paths
 
     Args:
-      n (int): integer
+      paths (list<str>): list of paths to walk to read the ABIs
 
     Returns:
-      int: n-th Fibonacci number
+      int: Number of events found
     """
-    assert n > 0
-    a, b = 1, 1
-    for _i in range(n - 1):
-        a, b = b, a + b
-    return a
+    events_found = event_parser.EventDefinition.load_all_events(paths)
+    for evt in events_found:
+        _logger.info(evt)
+    return len(events_found)
 
 
 # ---- CLI ----
@@ -72,13 +71,12 @@ def parse_args(args):
     Returns:
       :obj:`argparse.Namespace`: command line parameters namespace
     """
-    parser = argparse.ArgumentParser(description="Just a Fibonacci demonstration")
+    parser = argparse.ArgumentParser(description="Different commands to execute eth-pretty-events from command line")
     parser.add_argument(
         "--version",
         action="version",
         version=f"eth-pretty-events {__version__}",
     )
-    parser.add_argument(dest="n", help="n-th Fibonacci number", type=int, metavar="INT")
     parser.add_argument(
         "-v",
         "--verbose",
@@ -95,6 +93,11 @@ def parse_args(args):
         action="store_const",
         const=logging.DEBUG,
     )
+    subparsers = parser.add_subparsers(dest="command", required=True, help="sub-command to run")
+
+    load_events = subparsers.add_parser("load_events")
+
+    load_events.add_argument("paths", metavar="N", type=str, nargs="+", help="a list of strings")
     return parser.parse_args(args)
 
 
@@ -105,9 +108,7 @@ def setup_logging(loglevel):
       loglevel (int): minimum loglevel for emitting messages
     """
     logformat = "[%(asctime)s] %(levelname)s:%(name)s:%(message)s"
-    logging.basicConfig(
-        level=loglevel, stream=sys.stdout, format=logformat, datefmt="%Y-%m-%d %H:%M:%S"
-    )
+    logging.basicConfig(level=loglevel, stream=sys.stdout, format=logformat, datefmt="%Y-%m-%d %H:%M:%S")
 
 
 def main(args):
@@ -122,8 +123,9 @@ def main(args):
     """
     args = parse_args(args)
     setup_logging(args.loglevel)
-    _logger.debug("Starting crazy calculations...")
-    print(f"The {args.n}-th Fibonacci number is {fib(args.n)}")
+    if args.command == "load_events":
+        print(f"{load_events(args.paths)} events found")
+    _logger.debug(args)
     _logger.info("Script ends here")
 
 
