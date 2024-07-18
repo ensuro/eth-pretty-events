@@ -1,4 +1,5 @@
 import os
+from collections import namedtuple
 from pathlib import Path
 
 import pytest
@@ -11,7 +12,8 @@ __license__ = "MIT"
 
 
 def test_load_events():
-    assert load_events([]) == 0
+    Params = namedtuple("Params", "paths")
+    assert load_events(Params([])) == 0
 
 
 def test_main(capsys):

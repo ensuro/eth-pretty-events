@@ -21,10 +21,17 @@ References:
 """
 
 import argparse
+import itertools
+import json
 import logging
 import sys
 
-from eth_pretty_events import __version__, event_parser
+from web3 import Web3
+from web3.exceptions import ExtraDataLengthError
+from web3.middleware.geth_poa import geth_poa_middleware
+
+from eth_pretty_events import __version__, render
+from eth_pretty_events.event_parser import EventDefinition
 
 __author__ = "Guillermo M. Narvaja"
 __copyright__ = "Guillermo M. Narvaja"
@@ -40,7 +47,7 @@ _logger = logging.getLogger(__name__)
 # when using this Python module as a library.
 
 
-def load_events(paths):
+def load_events(args):
     """Loads all the events found in .json in the provided paths
 
     Args:
@@ -49,9 +56,82 @@ def load_events(paths):
     Returns:
       int: Number of events found
     """
-    events_found = event_parser.EventDefinition.load_all_events(paths)
+    events_found = EventDefinition.load_all_events(args.paths)
     for evt in events_found:
         _logger.info(evt)
+    return len(events_found)
+
+
+def _setup_web3(args):
+    w3 = Web3(Web3.HTTPProvider(args.rpc_url))
+    assert w3.is_connected()
+    try:
+        w3.eth.get_block("latest")
+    except ExtraDataLengthError:
+        w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+    return w3
+
+
+def _env_globals(args):
+    ret = {}
+    if args.bytes32_rainbow:
+        ret["b32_rainbow"] = json.load(open(args.bytes32_rainbow))
+        # TODO: process hashes or invert the dict
+    else:
+        ret["b32_rainbow"] = {}
+    if args.address_book:
+        ret["address_book"] = json.load(open(args.address_book))
+    else:
+        ret["address_book"] = {}
+    if args.chain_id:
+        ret["chain_id"] = int(args.chain_id)
+    elif args.rpc_url:
+        w3 = _setup_web3(args)
+        ret["chain_id"] = w3.eth.chain_id
+
+    if args.chains_file:
+        # https://chainid.network/chains.json like file
+        chains = json.load(open(args.chains_file))
+        ret["chains"] = dict((c["chainId"], c) for c in chains)
+
+    return ret
+
+
+def render_events(args):
+    """Renders the events found in a given input
+
+    Returns:
+      int: Number of events found
+    """
+    events_found = EventDefinition.load_all_events(args.abi_paths)
+    env_globals = _env_globals(args)
+    env = render.init_environment(args.template_paths, env_globals)
+
+    if args.input.endswith(".json"):
+        alchemy_input = json.load(open(args.input))
+        block = alchemy_input["event"]["data"]["block"]
+        events = (EventDefinition.read_graphql_log(log, block) for log in block["logs"])
+    elif args.input.startswith("0x") and len(args.input) == 66:
+        # It's a transaction hash
+        w3 = _setup_web3(args)
+        receipt = w3.eth.get_transaction_receipt(args.input)
+        events = (EventDefinition.read_log(log) for log in receipt.logs)
+    elif args.input.isdigit():
+        # It's a block number
+        w3 = _setup_web3(args)
+        block = w3.eth.get_block(int(args.input))
+        events = itertools.chain.from_iterable(
+            map(EventDefinition.read_log, w3.eth.get_transaction_receipt(tx).logs) for tx in block.transactions
+        )
+    else:
+        print(f"Unknown input '{args.input}'", file=sys.stderr)
+        sys.exit(1)
+
+    for event in events:
+        if not event:
+            continue
+        print(render.render(env, event, args.template_name))
+        print("--------------------------")
     return len(events_found)
 
 
@@ -98,6 +178,30 @@ def parse_args(args):
     load_events = subparsers.add_parser("load_events")
 
     load_events.add_argument("paths", metavar="N", type=str, nargs="+", help="a list of strings")
+
+    render_events = subparsers.add_parser("render_events")
+    render_events.add_argument("--abi-paths", type=str, nargs="+", help="search path to load ABIs")
+    render_events.add_argument("--template-paths", type=str, nargs="+", help="search path to load templates")
+    render_events.add_argument("--rpc-url", type=str, help="The RPC endpoint")
+    render_events.add_argument("--chain-id", type=int, help="The ID of the chain")
+    render_events.add_argument("--chains-file", type=str, help="File like https://chainid.network/chains.json")
+    render_events.add_argument(
+        "--address-book", type=str, help="JSON file with mapping of addresses (name to address or address to name)"
+    )
+    render_events.add_argument(
+        "--bytes32-rainbow",
+        type=str,
+        help="JSON file with mapping of hashes (b32 to name or name to b32 or list of names)",
+    )
+    render_events.add_argument(
+        "input",
+        metavar="<alchemy-input-json|txhash>",
+        type=str,
+        help="Alchemy JSON file or TX Transaction",
+    )
+    render_events.add_argument(
+        "template_name", metavar="<template_name>", type=str, help="The name of the template to render"
+    )
     return parser.parse_args(args)
 
 
@@ -124,7 +228,9 @@ def main(args):
     args = parse_args(args)
     setup_logging(args.loglevel)
     if args.command == "load_events":
-        print(f"{load_events(args.paths)} events found")
+        print(f"{load_events(args)} events found")
+    elif args.command == "render_events":
+        render_events(args)
     _logger.debug(args)
     _logger.info("Script ends here")
 
