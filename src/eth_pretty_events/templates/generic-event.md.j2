@@ -1,0 +1,8 @@
+## {{evt.event}}
+TX: {{evt.transactionHash | tx_link }}
+Block: {{evt.blockNumber | block_link }}
+Contract: {{evt.address|address_link}}
+{% for arg_name, arg_value in evt.args.items() %}
+Arg: {{ arg_name }}
+Arg value: {{ arg_value | autoformat_arg(evt.abi, arg_name) }}
+{% endfor %}

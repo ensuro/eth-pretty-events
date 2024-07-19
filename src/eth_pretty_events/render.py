@@ -2,9 +2,9 @@ import os
 from typing import Sequence
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from web3.types import EventData
 
 from . import jinja2_ext
+from .event_parser import EventDataRich
 
 
 def init_environment(
@@ -20,6 +20,6 @@ def init_environment(
     return env
 
 
-def render(env: Environment, event: EventData, template_name: str):
+def render(env: Environment, event: EventDataRich, template_name: str):
     template = env.get_template(template_name)
     return template.render(evt=event)

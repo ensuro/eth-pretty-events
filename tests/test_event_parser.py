@@ -124,6 +124,7 @@ def test_transfer_event():
         "transactionHash",
         "transactionIndex",
         "event",
+        "abi",
     }
 
     assert evt.graphql_log_to_log_receipt(graphql_log, gql_block_log) == transfer_log
@@ -172,6 +173,6 @@ def test_load_all_events_and_read_log_in_different_formats():
 
     # Test an event that has a struct in its arguments
     new_policy_log = EventDefinition.read_dict_log(new_policy_dict_log)
-    assert isinstance(new_policy_log["args"]["policy"], dict)
+    assert isinstance(dict(new_policy_log["args"]["policy"]), dict)
     assert "ensuroCommission" in new_policy_log["args"]["policy"]
     assert "riskModule" in new_policy_log["args"]

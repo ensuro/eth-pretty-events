@@ -6,8 +6,15 @@ from eth_utils import add_0x_prefix, event_abi_to_log_topic, to_checksum_address
 from hexbytes import HexBytes
 from web3 import Web3
 from web3._utils.events import get_event_data
+from web3.datastructures import AttributeDict
 from web3.exceptions import LogTopicError
-from web3.types import EventData, LogReceipt
+from web3.types import ABIEvent, EventData, LogReceipt
+
+
+class EventDataRich(EventData):
+    """EventData that also has the ABI and perhaps some extra methods"""
+
+    abi: ABIEvent
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -76,16 +83,20 @@ class EventDefinition:
             "transactionIndex": int(log["transactionIndex"], 16),
         }
 
-    def get_event_data(self, log_entry: LogReceipt) -> EventData:
+    def get_event_data(self, log_entry: LogReceipt) -> EventDataRich:
         for i, abi in enumerate(self.abis):
             try:
-                return get_event_data(self.abi_codec(), abi, log_entry)
+                ret = get_event_data(self.abi_codec(), abi, log_entry)
             except LogTopicError:
                 if i == len(self.abis) - 1:
                     raise
+            else:
+                # Adds "abi" attribute but keeps the same AttributeDict interface
+                # that allows getting the values as dict keys and attributes
+                return AttributeDict.recursive({"abi": abi} | dict(ret))
 
     @classmethod
-    def read_graphql_log(cls, gql_log: dict, block: dict) -> EventData:
+    def read_graphql_log(cls, gql_log: dict, block: dict) -> EventDataRich:
         log_entry = cls.graphql_log_to_log_receipt(gql_log, block)
         return cls.read_log(log_entry)
 
@@ -95,7 +106,7 @@ class EventDefinition:
         return cls.read_log(log_entry)
 
     @classmethod
-    def read_log(cls, log_entry: LogReceipt) -> EventData:
+    def read_log(cls, log_entry: LogReceipt) -> EventDataRich:
         if not log_entry["topics"]:
             return None  # Not an event
         topic = log_entry["topics"][0].hex()

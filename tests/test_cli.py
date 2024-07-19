@@ -22,7 +22,7 @@ def test_main(capsys):
     # https://docs.pytest.org/en/stable/capture.html
     main(["load_events", str(os.path.dirname(__file__) / Path("abis"))])
     captured = capsys.readouterr()
-    assert "18 events found" in captured.out
+    assert "25 events found" in captured.out
 
     with pytest.raises(SystemExit):
         main(["foobar"])
