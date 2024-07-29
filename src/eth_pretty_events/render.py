@@ -4,7 +4,7 @@ from typing import Sequence
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from . import jinja2_ext
-from .event_parser import EventDataRich
+from .types import Event
 
 
 def init_environment(
@@ -20,6 +20,6 @@ def init_environment(
     return env
 
 
-def render(env: Environment, event: EventDataRich, template_name: str):
+def render(env: Environment, event: Event, template_name: str):
     template = env.get_template(template_name)
     return template.render(evt=event)

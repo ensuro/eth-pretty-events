@@ -21,17 +21,19 @@ References:
 """
 
 import argparse
-import itertools
 import json
 import logging
 import sys
+from typing import Optional
 
 from web3 import Web3
 from web3.exceptions import ExtraDataLengthError
 from web3.middleware.geth_poa import geth_poa_middleware
 
 from eth_pretty_events import __version__, render
+from eth_pretty_events.alchemy_utils import graphql_log_to_log_receipt
 from eth_pretty_events.event_parser import EventDefinition
+from eth_pretty_events.types import Block, Chain, Hash, Tx
 
 __author__ = "Guillermo M. Narvaja"
 __copyright__ = "Guillermo M. Narvaja"
@@ -62,7 +64,9 @@ def load_events(args):
     return len(events_found)
 
 
-def _setup_web3(args):
+def _setup_web3(args) -> Optional[Web3]:
+    if args.rpc_url is None:
+        return None
     w3 = Web3(Web3.HTTPProvider(args.rpc_url))
     assert w3.is_connected()
     try:
@@ -72,7 +76,7 @@ def _setup_web3(args):
     return w3
 
 
-def _env_globals(args):
+def _env_globals(args, w3):
     ret = {}
     if args.bytes32_rainbow:
         ret["b32_rainbow"] = json.load(open(args.bytes32_rainbow))
@@ -83,18 +87,68 @@ def _env_globals(args):
         ret["address_book"] = json.load(open(args.address_book))
     else:
         ret["address_book"] = {}
+
     if args.chain_id:
-        ret["chain_id"] = int(args.chain_id)
-    elif args.rpc_url:
-        w3 = _setup_web3(args)
-        ret["chain_id"] = w3.eth.chain_id
+        chain_id = ret["chain_id"] = int(args.chain_id)
+        if w3 and chain_id != w3.eth.chain_id:
+            raise argparse.ArgumentTypeError(
+                f"--chain-id={chain_id} differs with the id of the RPC connection {w3.eth.chain_id}"
+            )
+    elif w3:
+        chain_id = ret["chain_id"] = w3.eth.chain_id
+    else:
+        raise argparse.ArgumentTypeError("Either --chain-id or --rpc-url must be specified")
 
     if args.chains_file:
         # https://chainid.network/chains.json like file
         chains = json.load(open(args.chains_file))
-        ret["chains"] = dict((c["chainId"], c) for c in chains)
+        chains = ret["chains"] = dict((c["chainId"], c) for c in chains)
+    else:
+        chains = ret["chains"] = {}
+
+    ret["chain"] = Chain(
+        id=chain_id,
+        name=chains.get(chain_id, {"name": f"chain-{chain_id}"})["name"],
+        metadata=chains.get(chain_id, None),
+    )
 
     return ret
+
+
+def _events_from_alchemy_input(alchemy_json: str, chain: Chain):
+    alchemy_input = json.load(open(alchemy_json))
+    alchemy_block = alchemy_input["event"]["data"]["block"]
+    block = Block(
+        chain=chain,
+        number=alchemy_block["number"],
+        hash=Hash(alchemy_block["hash"]),
+        timestamp=alchemy_block["timestamp"],
+    )
+    for alchemy_log in alchemy_block["logs"]:
+        log = graphql_log_to_log_receipt(alchemy_log, alchemy_block)
+        yield EventDefinition.read_log(log, block=block)
+
+
+def _events_from_tx(tx_hash: str, w3: Web3, chain: Chain):
+    receipt = w3.eth.get_transaction_receipt(tx_hash)
+    block = Block(
+        chain=chain,
+        hash=Hash(receipt.blockHash),
+        number=receipt.blockNumber,
+        timestamp=w3.eth.get_block(receipt.blockNumber).timestamp,
+    )
+    tx = Tx(block=block, hash=Hash(receipt.transactionHash), index=receipt.transactionIndex)
+    return (EventDefinition.read_log(log, block=block, tx=tx) for log in receipt.logs)
+
+
+def _events_from_block(block_number: int, w3: Web3, chain: Chain):
+    w3_block = w3.eth.get_block(block_number)
+    block = Block(chain=chain, number=block_number, timestamp=w3_block["timestamp"], hash=Hash(w3_block["hash"]))
+    for w3_tx in w3_block.transactions:
+        receipt = w3.eth.get_transaction_receipt(w3_tx)
+        tx = Tx(block=block, hash=Hash(receipt.transactionHash), index=receipt.transactionIndex)
+        for log in receipt.logs:
+            yield EventDefinition.read_log(log, tx=tx, block=block)
 
 
 def render_events(args):
@@ -104,25 +158,24 @@ def render_events(args):
       int: Number of events found
     """
     events_found = EventDefinition.load_all_events(args.abi_paths)
-    env_globals = _env_globals(args)
+    w3 = _setup_web3(args)
+    env_globals = _env_globals(args, w3)
+    chain = env_globals["chain"]
+
     env = render.init_environment(args.template_paths, env_globals)
 
     if args.input.endswith(".json"):
-        alchemy_input = json.load(open(args.input))
-        block = alchemy_input["event"]["data"]["block"]
-        events = (EventDefinition.read_graphql_log(log, block) for log in block["logs"])
+        events = _events_from_alchemy_input(args.input, chain)
     elif args.input.startswith("0x") and len(args.input) == 66:
+        if w3 is None:
+            raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
         # It's a transaction hash
-        w3 = _setup_web3(args)
-        receipt = w3.eth.get_transaction_receipt(args.input)
-        events = (EventDefinition.read_log(log) for log in receipt.logs)
+        events = _events_from_tx(args.input, w3, chain)
     elif args.input.isdigit():
+        if w3 is None:
+            raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
         # It's a block number
-        w3 = _setup_web3(args)
-        block = w3.eth.get_block(int(args.input))
-        events = itertools.chain.from_iterable(
-            map(EventDefinition.read_log, w3.eth.get_transaction_receipt(tx).logs) for tx in block.transactions
-        )
+        events = _events_from_block(int(args.input), w3, chain)
     else:
         print(f"Unknown input '{args.input}'", file=sys.stderr)
         sys.exit(1)

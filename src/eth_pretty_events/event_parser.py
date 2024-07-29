@@ -1,30 +1,29 @@
 import json
 import os
 from dataclasses import dataclass
+from typing import ClassVar, Dict, Optional, Sequence, Type
 
-from eth_utils import add_0x_prefix, event_abi_to_log_topic, to_checksum_address
+from eth_utils.abi import event_abi_to_log_topic
+from eth_utils.address import to_checksum_address
+from eth_utils.hexadecimal import add_0x_prefix
 from hexbytes import HexBytes
 from web3 import Web3
 from web3._utils.events import get_event_data
-from web3.datastructures import AttributeDict
 from web3.exceptions import LogTopicError
-from web3.types import ABIEvent, EventData, LogReceipt
+from web3.types import LogReceipt
 
-
-class EventDataRich(EventData):
-    """EventData that also has the ABI and perhaps some extra methods"""
-
-    abi: ABIEvent
+from .types import ArgsTuple, Block, Event, Tx, make_abi_namedtuple
 
 
 @dataclass(frozen=True, kw_only=True)
 class EventDefinition:
     topic: str
     abis: list
+    args_types: Sequence[Type[ArgsTuple]]
 
     name: str
 
-    _registry = {}
+    _registry: ClassVar[Dict[str, "EventDefinition"]] = {}
 
     def __post_init__(self):
         if self.topic in self._registry and self._registry[self.topic] != self:
@@ -49,25 +48,12 @@ class EventDefinition:
         So, in some cases one signature will work and the other won't. We store both abis and when parsing
         it tries all.
         """
-        new_abis = [abi for abi in new.abis if abi not in prev.abis]
+        new_abis = [(abi, new.args_types[i]) for i, abi in enumerate(new.abis) if abi not in prev.abis]
         if not new_abis:
             return prev
-        prev.abis.extend(new_abis)
+        prev.abis.extend([abi for (abi, _) in new_abis])
+        prev.args_types.extend([arg_type for (_, arg_type) in new_abis])
         return prev
-
-    @classmethod
-    def graphql_log_to_log_receipt(cls, gql_log: dict, block: dict) -> LogReceipt:
-        return {
-            "transactionHash": HexBytes(gql_log["transaction"]["hash"]),
-            "address": to_checksum_address(gql_log["account"]["address"]),
-            "blockHash": HexBytes(block["hash"]),
-            "blockNumber": block["number"],
-            "data": gql_log["data"],
-            "logIndex": gql_log["index"],
-            "removed": False,
-            "topics": [HexBytes(t) for t in gql_log["topics"]],
-            "transactionIndex": gql_log["transaction"]["index"],
-        }
 
     @classmethod
     def dict_log_to_log_receipt(cls, log: dict) -> LogReceipt:
@@ -83,7 +69,7 @@ class EventDefinition:
             "transactionIndex": int(log["transactionIndex"], 16),
         }
 
-    def get_event_data(self, log_entry: LogReceipt) -> EventDataRich:
+    def get_event_data(self, log_entry: LogReceipt, block: Block, tx: Optional[Tx] = None) -> Optional[Event]:
         for i, abi in enumerate(self.abis):
             try:
                 ret = get_event_data(self.abi_codec(), abi, log_entry)
@@ -91,38 +77,32 @@ class EventDefinition:
                 if i == len(self.abis) - 1:
                     raise
             else:
-                # Adds "abi" attribute but keeps the same AttributeDict interface
-                # that allows getting the values as dict keys and attributes
-                return AttributeDict.recursive({"abi": abi} | dict(ret))
+                return Event.from_event_data(ret, self.args_types[i], tx=tx, block=block)
 
     @classmethod
-    def read_graphql_log(cls, gql_log: dict, block: dict) -> EventDataRich:
-        log_entry = cls.graphql_log_to_log_receipt(gql_log, block)
-        return cls.read_log(log_entry)
-
-    @classmethod
-    def read_dict_log(cls, log: dict) -> EventData:
-        log_entry = cls.dict_log_to_log_receipt(log)
-        return cls.read_log(log_entry)
-
-    @classmethod
-    def read_log(cls, log_entry: LogReceipt) -> EventDataRich:
+    def read_log(cls, log_entry: LogReceipt, block: Block, tx: Optional[Tx] = None) -> Optional[Event]:
         if not log_entry["topics"]:
             return None  # Not an event
         topic = log_entry["topics"][0].hex()
         if topic not in cls._registry:
             return None
         event = cls._registry[topic]
-        return event.get_event_data(log_entry)
+        return event.get_event_data(log_entry, block, tx)
 
     @classmethod
     def abi_codec(cls):
         return Web3().codec
 
     @classmethod
+    def get_by_topic(cls, topic: str) -> "EventDefinition":
+        return cls._registry[topic]
+
+    @classmethod
     def from_abi(cls, abi):
         topic = add_0x_prefix(event_abi_to_log_topic(abi).hex())
-        return cls(topic=topic, abis=[abi], name=abi["name"])
+        return cls(
+            topic=topic, abis=[abi], name=abi["name"], args_types=[make_abi_namedtuple(abi["name"], abi["inputs"])]
+        )
 
     @classmethod
     def load_events(cls, contract_abi):

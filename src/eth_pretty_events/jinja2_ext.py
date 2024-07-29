@@ -2,30 +2,31 @@ from decimal import Decimal
 
 from jinja2 import Environment, pass_environment
 
+from .types import Address, Hash
+
 MAX_UINT = 2**256 - 1
 
 
-def _address(env, value):
+def _address(env, value: Address):
     if value in env.globals["address_book"]:
         return env.globals["address_book"][value]
     return value
 
 
 @pass_environment
-def address(env, value):
+def address(env, value: Address):
     return _address(env, value)
 
 
 @pass_environment
-def role(env, value):
-    if value == (b"\x00" * 32):
+def role(env, value: Hash):
+    if value == "0x0000000000000000000000000000000000000000000000000000000000000000":
         return "DEFAULT_ADMIN_ROLE"
     return unhash(env, value)
 
 
 @pass_environment
-def unhash(env, value):
-    value = f"0x{value.hex()}"
+def unhash(env, value: Hash):
     if value in env.globals["b32_rainbow"]:
         unhashed = env.globals["b32_rainbow"][value]
         return (
@@ -48,39 +49,37 @@ def _explorer_url(env):
 
 
 @pass_environment
-def tx_link(env, value):
-    value = value.hex()
+def tx_link(env, value: Hash):
     url = _explorer_url(env)
     return f"[{value}]({url}/tx/{value})"
 
 
 @pass_environment
-def block_link(env, value):
+def block_link(env, value: int):
     url = _explorer_url(env)
     return f"[{value}]({url}/block/{value})"
 
 
 @pass_environment
-def address_link(env, address):
+def address_link(env, address: Address):
     address_text = _address(env, address)
     url = _explorer_url(env)
     return f"[{address_text}]({url}/address/{address})"
 
 
 @pass_environment
-def autoformat_arg(env, arg_value, abi, arg_name):
-    arg_meta = next((x for x in abi["inputs"] if x["name"] == arg_name), None)
-    if not arg_meta:
-        return arg_name  # Shouldn't happend but I just return without any formating
-    if arg_meta["type"] == "address":
+def autoformat_arg(env, arg_value, arb_abi):
+    if not arb_abi:
+        return arg_value  # Shouldn't happend but I just return without any formating
+    if arb_abi["type"] == "address":
         return address_link(env, arg_value)
-    if arg_meta["type"] == "bytes32" and arg_name == "role":
+    if arb_abi["type"] == "bytes32" and arb_abi["name"] == "role":
         return role(env, arg_value)
-    if arg_meta["type"] == "bytes32":
+    if arb_abi["type"] == "bytes32":
         return unhash(env, arg_value)
-    if arg_meta["type"] == "uint256" and arg_name in ("value", "amount"):
+    if arb_abi["type"] == "uint256" and arb_abi["name"] in ("value", "amount"):
         return amount(arg_value)
-    return arg_name
+    return arg_value
 
 
 def amount(value, decimals="auto"):

@@ -3,8 +3,10 @@ import os
 from pathlib import Path
 
 from hexbytes import HexBytes
+from web3.types import LogReceipt
 
 from eth_pretty_events.event_parser import EventDefinition
+from eth_pretty_events.types import Address, Block, Chain
 
 ABIS_PATH = os.path.dirname(__file__) / Path("abis")
 
@@ -19,12 +21,21 @@ TRANSFER_EVENT = """{
     "type": "event"
 }"""
 
+chain = Chain(id=137, name="Polygon")
+
+block = Block(
+    chain=chain,
+    number=34530281,
+    hash="0x81145f3e891ab54554d964f901f122635ba4b00e22066157c6cabb647f959506",
+    timestamp=1666168181,
+)
+
 # LogReceipt as parsed and expected by Web3
-transfer_log = {
+transfer_log: LogReceipt = {
     "transactionHash": HexBytes("0x37a50ac80e26cbf0005469713177e3885800188d80b92134f150685e931aa4bf"),
     "address": "0x9aa7fEc87CA69695Dd1f879567CcF49F3ba417E2",
-    "blockHash": HexBytes("0x81145f3e891ab54554d964f901f122635ba4b00e22066157c6cabb647f959506"),
-    "blockNumber": 34530281,
+    "blockHash": HexBytes(block.hash),
+    "blockNumber": block.number,
     "data": "0x00000000000000000000000000000000000000000000000000000002540be400",
     "logIndex": 2,
     "removed": False,
@@ -71,8 +82,8 @@ graphql_log = {
 
 # Block in GraphQL format (only the fields relevant for event parsing)
 gql_block_log = {
-    "hash": "0x81145f3e891ab54554d964f901f122635ba4b00e22066157c6cabb647f959506",
-    "number": 34530281,
+    "hash": block.hash,
+    "number": block.number,
 }
 
 # NewPolicy log as returned by RPC
@@ -97,41 +108,27 @@ def test_transfer_event():
     global transfer_dict_log
     global gql_log
     global gql_block_log
+    global block
 
     abi = json.loads(TRANSFER_EVENT)
-    evt = EventDefinition.from_abi(abi)
+    evt_def = EventDefinition.from_abi(abi)
+    assert evt_def.name == "Transfer"
+
+    evt = evt_def.get_event_data(transfer_log, block=block)
+    assert evt is not None
+    assert evt.address == "0x9aa7fEc87CA69695Dd1f879567CcF49F3ba417E2"
+    assert evt.tx.index == 1
+    assert evt.tx.hash == "0x37a50ac80e26cbf0005469713177e3885800188d80b92134f150685e931aa4bf"
+    assert evt.tx.block.hash == "0x81145f3e891ab54554d964f901f122635ba4b00e22066157c6cabb647f959506"
+    assert evt.args._fields == ("from_", "to", "value")
+    addr_from = Address("0xd758af6bfc2f0908d7c5f89942be52c36a6b3cab")
+    addr_to = Address("0x8fca634a6edec7161def4478e94b930ea275a8a2")
+    assert evt.args["from"] == addr_from
+    assert evt.args["to"] == addr_to
+    assert evt.log_index == 2
     assert evt.name == "Transfer"
 
-    log = evt.get_event_data(transfer_log)
-    assert log["address"] == "0x9aa7fEc87CA69695Dd1f879567CcF49F3ba417E2"
-    assert log["blockHash"] == HexBytes("0x81145f3e891ab54554d964f901f122635ba4b00e22066157c6cabb647f959506")
-    assert log["blockNumber"] == 34530281
-    assert log["args"] == {
-        "from": "0xD758aF6BFC2f0908D7C5f89942be52C36a6b3cab",
-        "to": "0x8fca634A6EDEc7161dEF4478e94B930Ea275A8a2",
-        "value": 10000000000,
-    }
-    assert log["logIndex"] == 2
-    assert log["event"] == "Transfer"
-    assert log["transactionIndex"] == 1
-    assert log["transactionHash"] == HexBytes("0x37a50ac80e26cbf0005469713177e3885800188d80b92134f150685e931aa4bf")
-    assert set(log.keys()) == {
-        "address",
-        "blockNumber",
-        "blockHash",
-        "args",
-        "logIndex",
-        "transactionHash",
-        "transactionIndex",
-        "event",
-        "abi",
-    }
-
-    assert evt.graphql_log_to_log_receipt(graphql_log, gql_block_log) == transfer_log
-    assert evt.dict_log_to_log_receipt(transfer_dict_log) == transfer_log
-
-    assert evt.get_event_data(evt.graphql_log_to_log_receipt(graphql_log, gql_block_log)) == log
-    assert evt.get_event_data(evt.dict_log_to_log_receipt(transfer_dict_log)) == log
+    assert evt_def.dict_log_to_log_receipt(transfer_dict_log) == transfer_log
 
 
 def test_load_events():
@@ -161,18 +158,37 @@ def test_load_all_events_then_reset():
 
 
 def test_load_all_events_and_read_log_in_different_formats():
+    global block
+
     EventDefinition.load_all_events([ABIS_PATH])
 
-    log = EventDefinition.read_log(transfer_log)
+    evt = EventDefinition.read_log(transfer_log, block=block)
 
-    assert log is not None
-    assert log["event"] == "Transfer"
-
-    assert EventDefinition.read_dict_log(transfer_dict_log) == log
-    assert EventDefinition.read_graphql_log(graphql_log, gql_block_log) == log
+    assert evt is not None
+    assert evt.name == "Transfer"
 
     # Test an event that has a struct in its arguments
-    new_policy_log = EventDefinition.read_dict_log(new_policy_dict_log)
-    assert isinstance(dict(new_policy_log["args"]["policy"]), dict)
-    assert "ensuroCommission" in new_policy_log["args"]["policy"]
-    assert "riskModule" in new_policy_log["args"]
+    new_policy_log = EventDefinition.dict_log_to_log_receipt(new_policy_dict_log)
+    new_policy_evt = EventDefinition.read_log(new_policy_log, block=block)
+    assert isinstance(new_policy_evt.args.policy, tuple)
+    assert new_policy_evt.args.policy.ensuroCommission == 2048142
+    assert new_policy_evt.args.policy.riskModule == "0x0d175CB042dd6997ac37588954Fc5A7b8bab5615"
+
+
+def test_loads_when_multiple_abis_for_same_topic():
+    EventDefinition.load_all_events([ABIS_PATH])
+
+    transfer_evt_def = EventDefinition.get_by_topic(
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+    )
+    assert len(transfer_evt_def.abis) == 2  # Has ERC20 Transfer and ERC721 Transfer
+    assert len(transfer_evt_def.args_types) == 2  # Has ERC20 Transfer and ERC721 Transfer
+    if transfer_evt_def.args_types[0]._fields == ("from_", "to", "value"):
+        assert [i["name"] for i in transfer_evt_def.abis[0]["inputs"]] == ["from", "to", "value"]
+        assert transfer_evt_def.args_types[1]._fields == ("from_", "to", "tokenId")
+        assert [i["name"] for i in transfer_evt_def.abis[1]["inputs"]] == ["from", "to", "tokenId"]
+    else:
+        assert transfer_evt_def.args_types[0]._fields == ("from_", "to", "tokenId")
+        assert [i["name"] for i in transfer_evt_def.abis[0]["inputs"]] == ["from", "to", "tokenId"]
+        assert transfer_evt_def.args_types[1]._fields == ("from_", "to", "value")
+        assert [i["name"] for i in transfer_evt_def.abis[1]["inputs"]] == ["from", "to", "value"]
