@@ -30,10 +30,10 @@ from web3 import Web3
 from web3.exceptions import ExtraDataLengthError
 from web3.middleware.geth_poa import geth_poa_middleware
 
-from eth_pretty_events import __version__, render
+from eth_pretty_events import __version__, address_book, render
 from eth_pretty_events.alchemy_utils import graphql_log_to_log_receipt
 from eth_pretty_events.event_parser import EventDefinition
-from eth_pretty_events.types import Block, Chain, Hash, Tx
+from eth_pretty_events.types import Address, Block, Chain, Hash, Tx
 
 __author__ = "Guillermo M. Narvaja"
 __copyright__ = "Guillermo M. Narvaja"
@@ -76,6 +76,18 @@ def _setup_web3(args) -> Optional[Web3]:
     return w3
 
 
+def _setup_address_book(args, _: Optional[Web3]):
+    if args.address_book:
+        addr_data = json.load(open(args.address_book))
+        try:
+            addr_data = dict((Address(k), v) for (k, v) in addr_data.items())
+            class_ = address_book.AddrToNameAddressBook
+        except ValueError:
+            addr_data = dict((k, Address(v)) for (k, v) in addr_data.items())
+            class_ = address_book.NameToAddrAddressBook
+        address_book.setup_default(class_(addr_data))
+
+
 def _env_globals(args, w3):
     ret = {}
     if args.bytes32_rainbow:
@@ -83,10 +95,6 @@ def _env_globals(args, w3):
         # TODO: process hashes or invert the dict
     else:
         ret["b32_rainbow"] = {}
-    if args.address_book:
-        ret["address_book"] = json.load(open(args.address_book))
-    else:
-        ret["address_book"] = {}
 
     if args.chain_id:
         chain_id = ret["chain_id"] = int(args.chain_id)
@@ -161,6 +169,8 @@ def render_events(args):
     w3 = _setup_web3(args)
     env_globals = _env_globals(args, w3)
     chain = env_globals["chain"]
+
+    _setup_address_book(args, w3)
 
     env = render.init_environment(args.template_paths, env_globals)
 

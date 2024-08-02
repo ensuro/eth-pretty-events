@@ -2,20 +2,18 @@ from decimal import Decimal
 
 from jinja2 import Environment, pass_environment
 
+from .address_book import get_default as get_addr_book
 from .types import Address, Hash
 
 MAX_UINT = 2**256 - 1
 
 
-def _address(env, value: Address):
-    if value in env.globals["address_book"]:
-        return env.globals["address_book"][value]
-    return value
+def _address(value: Address):
+    return get_addr_book().addr_to_name(value)
 
 
-@pass_environment
-def address(env, value: Address):
-    return _address(env, value)
+def address(value: Address):
+    return _address(value)
 
 
 @pass_environment
@@ -62,7 +60,7 @@ def block_link(env, value: int):
 
 @pass_environment
 def address_link(env, address: Address):
-    address_text = _address(env, address)
+    address_text = _address(address)
     url = _explorer_url(env)
     return f"[{address_text}]({url}/address/{address})"
 
