@@ -26,12 +26,14 @@ import logging
 import sys
 from typing import Optional
 
+import yaml
 from web3 import Web3
 from web3.exceptions import ExtraDataLengthError
 from web3.middleware.geth_poa import geth_poa_middleware
 
 from eth_pretty_events import __version__, address_book, render
 from eth_pretty_events.alchemy_utils import graphql_log_to_log_receipt
+from eth_pretty_events.event_filter import find_template, read_template_rules
 from eth_pretty_events.event_parser import EventDefinition
 from eth_pretty_events.types import Address, Block, Chain, Hash, Tx
 
@@ -174,6 +176,8 @@ def render_events(args):
 
     env = render.init_environment(args.template_paths, env_globals)
 
+    template_rules = read_template_rules(yaml.load(open(args.template_rules), yaml.SafeLoader))
+
     if args.input.endswith(".json"):
         events = _events_from_alchemy_input(args.input, chain)
     elif args.input.startswith("0x") and len(args.input) == 66:
@@ -193,7 +197,10 @@ def render_events(args):
     for event in events:
         if not event:
             continue
-        print(render.render(env, event, args.template_name))
+        template_name = find_template(template_rules, event)
+        if template_name is None:
+            continue
+        print(render.render(env, event, template_name))
         print("--------------------------")
     return len(events_found)
 
@@ -263,7 +270,10 @@ def parse_args(args):
         help="Alchemy JSON file or TX Transaction",
     )
     render_events.add_argument(
-        "template_name", metavar="<template_name>", type=str, help="The name of the template to render"
+        "template_rules",
+        metavar="<template_rules>",
+        type=str,
+        help="Yaml file with the rules that map the events to templates",
     )
     return parser.parse_args(args)
 

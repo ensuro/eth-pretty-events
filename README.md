@@ -14,10 +14,9 @@
 
 # eth-pretty-events
 
-> Add a short description here!
+> A library for parsing, filterning and formatting EVM events
 
 A longer description of your project goes here...
-
 
 <!-- pyscaffold-notes -->
 

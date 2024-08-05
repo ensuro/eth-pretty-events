@@ -1,0 +1,7 @@
+rules:
+  - template: ERC20-transfer.md.j2
+    match:
+      - event: Transfer
+  - template: generic-event.md.j2
+    match:
+      - filter_type: "true"
