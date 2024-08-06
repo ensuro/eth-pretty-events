@@ -113,6 +113,28 @@ class ArgEventFilter(EventFilter):
         return self._get_arg(evt) == self.arg_value
 
 
+@EventFilter.register("arg_exists")
+class ArgExistsEventFilter(EventFilter):
+    def __init__(self, arg_name: str):
+        self.arg_name = arg_name
+
+    def _get_arg(self, evt: Event):
+        arg_path = self.arg_name.split(".")
+        try:
+            ret = evt.args[arg_path[0]]
+        except KeyError:
+            return None
+        for arg_step in arg_path[1:]:
+            try:
+                ret = ret[arg_step]
+            except KeyError:
+                return None
+        return ret
+
+    def filter(self, evt: Event) -> bool:
+        return self._get_arg(evt) is not None
+
+
 @EventFilter.register("address_arg")
 class AddressArgEventFilter(ArgEventFilter):
     def __init__(self, arg_name: str, arg_value: Any):
