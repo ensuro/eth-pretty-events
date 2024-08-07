@@ -25,18 +25,23 @@ import json
 import logging
 import os
 import sys
-from typing import Optional, Sequence
+from dataclasses import dataclass
+from typing import Any, Optional, Sequence
 
+import jinja2
 import yaml
 from web3 import Web3
 from web3.exceptions import ExtraDataLengthError
 from web3.middleware.geth_poa import geth_poa_middleware
 
-from eth_pretty_events import __version__, address_book, render
-from eth_pretty_events.alchemy_utils import graphql_log_to_log_receipt
-from eth_pretty_events.event_filter import find_template, read_template_rules
+from eth_pretty_events import __version__, address_book, decode_events, render
+from eth_pretty_events.event_filter import (
+    TemplateRule,
+    find_template,
+    read_template_rules,
+)
 from eth_pretty_events.event_parser import EventDefinition
-from eth_pretty_events.types import Address, Block, Chain, Hash, Tx
+from eth_pretty_events.types import Address, Chain
 
 __author__ = "Guillermo M. Narvaja"
 __copyright__ = "Guillermo M. Narvaja"
@@ -65,6 +70,15 @@ def load_events(args):
     for evt in events_found:
         _logger.info(evt)
     return len(events_found)
+
+
+@dataclass
+class RenderingEnv:
+    jinja_env: "jinja2.Environment"
+    w3: Optional[Web3]
+    chain: Chain
+    template_rules: Sequence[TemplateRule]
+    args: Any
 
 
 def _setup_web3(args) -> Optional[Web3]:
@@ -126,84 +140,57 @@ def _env_globals(args, w3):
     return ret
 
 
-def _events_from_alchemy_input(alchemy_json: str, chain: Chain):
-    alchemy_input = json.load(open(alchemy_json))
-    alchemy_block = alchemy_input["event"]["data"]["block"]
-    block = Block(
-        chain=chain,
-        number=alchemy_block["number"],
-        hash=Hash(alchemy_block["hash"]),
-        timestamp=alchemy_block["timestamp"],
-    )
-    for alchemy_log in alchemy_block["logs"]:
-        log = graphql_log_to_log_receipt(alchemy_log, alchemy_block)
-        yield EventDefinition.read_log(log, block=block)
-
-
-def _events_from_tx(tx_hash: str, w3: Web3, chain: Chain):
-    receipt = w3.eth.get_transaction_receipt(tx_hash)
-    block = Block(
-        chain=chain,
-        hash=Hash(receipt.blockHash),
-        number=receipt.blockNumber,
-        timestamp=w3.eth.get_block(receipt.blockNumber).timestamp,
-    )
-    tx = Tx(block=block, hash=Hash(receipt.transactionHash), index=receipt.transactionIndex)
-    return (EventDefinition.read_log(log, block=block, tx=tx) for log in receipt.logs)
-
-
-def _events_from_block(block_number: int, w3: Web3, chain: Chain):
-    w3_block = w3.eth.get_block(block_number)
-    block = Block(chain=chain, number=block_number, timestamp=w3_block["timestamp"], hash=Hash(w3_block["hash"]))
-    for w3_tx in w3_block.transactions:
-        receipt = w3.eth.get_transaction_receipt(w3_tx)
-        tx = Tx(block=block, hash=Hash(receipt.transactionHash), index=receipt.transactionIndex)
-        for log in receipt.logs:
-            yield EventDefinition.read_log(log, tx=tx, block=block)
-
-
-def render_events(args):
-    """Renders the events found in a given input
-
-    Returns:
-      int: Number of events found
-    """
-    events_found = EventDefinition.load_all_events(args.abi_paths)
+def setup_rendering_env(args) -> RenderingEnv:
+    """Sets up the rendering environment"""
+    EventDefinition.load_all_events(args.abi_paths)
     w3 = _setup_web3(args)
     env_globals = _env_globals(args, w3)
     chain = env_globals["chain"]
 
     _setup_address_book(args, w3)
 
-    env = render.init_environment(args.template_paths, env_globals)
+    jinja_env = render.init_environment(args.template_paths, env_globals)
 
     template_rules = read_template_rules(yaml.load(open(args.template_rules), yaml.SafeLoader))
+    return RenderingEnv(
+        w3=w3,
+        jinja_env=jinja_env,
+        template_rules=template_rules,
+        chain=chain,
+        args=args,
+    )
 
-    if args.input.endswith(".json"):
-        events = _events_from_alchemy_input(args.input, chain)
-    elif args.input.startswith("0x") and len(args.input) == 66:
-        if w3 is None:
+
+def render_events(renv: RenderingEnv, input: str):
+    """Renders the events found in a given input
+
+    Returns:
+      int: Number of events found
+    """
+
+    if input.endswith(".json"):
+        events = decode_events.decode_from_alchemy_input(json.load(open(input)), renv.chain)
+    elif input.startswith("0x") and len(input) == 66:
+        if renv.w3 is None:
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
         # It's a transaction hash
-        events = _events_from_tx(args.input, w3, chain)
-    elif args.input.isdigit():
-        if w3 is None:
+        events = decode_events.decode_from_tx(input, renv.w3, renv.chain)
+    elif input.isdigit():
+        if renv.w3 is None:
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
         # It's a block number
-        events = _events_from_block(int(args.input), w3, chain)
+        events = decode_events.decode_from_block(int(input), renv.w3, renv.chain)
     else:
-        print(f"Unknown input '{args.input}'", file=sys.stderr)
-        sys.exit(1)
+        raise argparse.ArgumentTypeError(f"Unknown input '{input}'")
 
     for event in events:
         if not event:
             continue
-        template_name = find_template(template_rules, event)
+        template_name = find_template(renv.template_rules, event)
         if template_name is None:
             continue
-        print(render.render(env, event, template_name))
+        print(render.render(renv.jinja_env, event, template_name))
         print("--------------------------")
-    return len(events_found)
 
 
 # ---- CLI ----
@@ -258,6 +245,43 @@ def parse_args(args):
         action="store_const",
         const=logging.DEBUG,
     )
+    parser.add_argument(
+        "--abi-paths", type=str, nargs="+", help="search path to load ABIs", default=_env_list("ABI_PATHS")
+    )
+    parser.add_argument(
+        "--template-paths",
+        type=str,
+        nargs="+",
+        help="search path to load templates",
+        default=_env_list("TEMPLATE_PATHS"),
+    )
+    parser.add_argument("--rpc-url", type=str, help="The RPC endpoint", default=os.environ.get("RPC_URL"))
+    parser.add_argument("--chain-id", type=int, help="The ID of the chain", default=_env_int("CHAIN_ID"))
+    parser.add_argument(
+        "--chains-file",
+        type=str,
+        help="File like https://chainid.network/chains.json",
+        default=os.environ.get("CHAINS_FILE"),
+    )
+    parser.add_argument(
+        "--address-book",
+        type=str,
+        help="JSON file with mapping of addresses (name to address or address to name)",
+        default=os.environ.get("ADDRESS_BOOK"),
+    )
+    parser.add_argument(
+        "--bytes32-rainbow",
+        type=str,
+        help="JSON file with mapping of hashes (b32 to name or name to b32 or list of names)",
+        default=os.environ.get("BYTES32_RAINBOW"),
+    )
+    parser.add_argument(
+        "--template-rules",
+        metavar="<template_rules>",
+        type=str,
+        help="Yaml file with the rules that map the events to templates",
+        default=os.environ.get("TEMPLATE_RULES"),
+    )
     subparsers = parser.add_subparsers(dest="command", required=True, help="sub-command to run")
 
     load_events = subparsers.add_parser("load_events")
@@ -266,47 +290,22 @@ def parse_args(args):
 
     render_events = subparsers.add_parser("render_events")
     render_events.add_argument(
-        "--abi-paths", type=str, nargs="+", help="search path to load ABIs", default=_env_list("ABI_PATHS")
-    )
-    render_events.add_argument(
-        "--template-paths",
-        type=str,
-        nargs="+",
-        help="search path to load templates",
-        default=_env_list("TEMPLATE_PATHS"),
-    )
-    render_events.add_argument("--rpc-url", type=str, help="The RPC endpoint", default=os.environ.get("RPC_URL"))
-    render_events.add_argument("--chain-id", type=int, help="The ID of the chain", default=_env_int("CHAIN_ID"))
-    render_events.add_argument(
-        "--chains-file",
-        type=str,
-        help="File like https://chainid.network/chains.json",
-        default=os.environ.get("CHAINS_FILE"),
-    )
-    render_events.add_argument(
-        "--address-book",
-        type=str,
-        help="JSON file with mapping of addresses (name to address or address to name)",
-        default=os.environ.get("ADDRESS_BOOK"),
-    )
-    render_events.add_argument(
-        "--bytes32-rainbow",
-        type=str,
-        help="JSON file with mapping of hashes (b32 to name or name to b32 or list of names)",
-        default=os.environ.get("BYTES32_RAINBOW"),
-    )
-    render_events.add_argument(
-        "--template-rules",
-        metavar="<template_rules>",
-        type=str,
-        help="Yaml file with the rules that map the events to templates",
-        default=os.environ.get("TEMPLATE_RULES"),
-    )
-    render_events.add_argument(
         "input",
         metavar="<alchemy-input-json|txhash>",
         type=str,
         help="Alchemy JSON file or TX Transaction",
+    )
+
+    flask_dev = subparsers.add_parser("flask_dev")
+    flask_dev.add_argument("--port", type=int, help="Port to start flask dev server", default=8000)
+    flask_dev.add_argument("--host", type=str, help="Host to start flask dev server", default=None)
+
+    flask_gunicorn = subparsers.add_parser("flask_gunicorn")
+    flask_gunicorn.add_argument(
+        "--rollbar-token", type=str, help="Token to send errors to rollbar", default=os.environ.get("ROLLBAR_TOKEN")
+    )
+    flask_gunicorn.add_argument(
+        "--rollbar-env", type=str, help="Name of the rollbar environment", default=os.environ.get("ROLLBAR_ENVIRONMENT")
     )
     return parser.parse_args(args)
 
@@ -322,23 +321,23 @@ def setup_logging(loglevel):
 
 
 def main(args):
-    """Wrapper allowing :func:`fib` to be called with string arguments in a CLI fashion
-
-    Instead of returning the value from :func:`fib`, it prints the result to the
-    ``stdout`` in a nicely formatted message.
-
-    Args:
-      args (List[str]): command line parameters as list of strings
-          (for example  ``["--verbose", "42"]``).
-    """
     args = parse_args(args)
     setup_logging(args.loglevel)
     if args.command == "load_events":
         print(f"{load_events(args)} events found")
     elif args.command == "render_events":
-        render_events(args)
-    _logger.debug(args)
-    _logger.info("Script ends here")
+        renv = setup_rendering_env(args)
+        render_events(renv, args.input)
+    elif args.command in ("flask_dev", "flask_gunicorn"):
+        from . import flask_app
+
+        renv = setup_rendering_env(args)
+        # TODO: rollbar setup?
+        flask_app.app.config["renv"] = renv
+        if args.command == "flask_dev":
+            flask_app.app.run(port=args.port)
+        else:
+            return flask_app.app
 
 
 def run():
@@ -358,6 +357,6 @@ if __name__ == "__main__":
     # After installing your project with pip, users can also run your Python
     # modules as scripts via the ``-m`` flag, as defined in PEP 338::
     #
-    #     python -m eth_pretty_events.skeleton 42
+    #     python -m eth_pretty_events.cli ...
     #
     run()
