@@ -23,8 +23,9 @@ References:
 import argparse
 import json
 import logging
+import os
 import sys
-from typing import Optional
+from typing import Optional, Sequence
 
 import yaml
 from web3 import Web3
@@ -211,6 +212,20 @@ def render_events(args):
 # executable/script.
 
 
+def _env_list(env_var) -> Optional[Sequence[str]]:
+    value = os.environ.get(env_var)
+    if value is not None:
+        return value.split()
+    return None
+
+
+def _env_int(env_var) -> Optional[int]:
+    value = os.environ.get(env_var)
+    if value is not None:
+        return int(value)
+    return None
+
+
 def parse_args(args):
     """Parse command line parameters
 
@@ -250,30 +265,48 @@ def parse_args(args):
     load_events.add_argument("paths", metavar="N", type=str, nargs="+", help="a list of strings")
 
     render_events = subparsers.add_parser("render_events")
-    render_events.add_argument("--abi-paths", type=str, nargs="+", help="search path to load ABIs")
-    render_events.add_argument("--template-paths", type=str, nargs="+", help="search path to load templates")
-    render_events.add_argument("--rpc-url", type=str, help="The RPC endpoint")
-    render_events.add_argument("--chain-id", type=int, help="The ID of the chain")
-    render_events.add_argument("--chains-file", type=str, help="File like https://chainid.network/chains.json")
     render_events.add_argument(
-        "--address-book", type=str, help="JSON file with mapping of addresses (name to address or address to name)"
+        "--abi-paths", type=str, nargs="+", help="search path to load ABIs", default=_env_list("ABI_PATHS")
+    )
+    render_events.add_argument(
+        "--template-paths",
+        type=str,
+        nargs="+",
+        help="search path to load templates",
+        default=_env_list("TEMPLATE_PATHS"),
+    )
+    render_events.add_argument("--rpc-url", type=str, help="The RPC endpoint", default=os.environ.get("RPC_URL"))
+    render_events.add_argument("--chain-id", type=int, help="The ID of the chain", default=_env_int("CHAIN_ID"))
+    render_events.add_argument(
+        "--chains-file",
+        type=str,
+        help="File like https://chainid.network/chains.json",
+        default=os.environ.get("CHAINS_FILE"),
+    )
+    render_events.add_argument(
+        "--address-book",
+        type=str,
+        help="JSON file with mapping of addresses (name to address or address to name)",
+        default=os.environ.get("ADDRESS_BOOK"),
     )
     render_events.add_argument(
         "--bytes32-rainbow",
         type=str,
         help="JSON file with mapping of hashes (b32 to name or name to b32 or list of names)",
+        default=os.environ.get("BYTES32_RAINBOW"),
+    )
+    render_events.add_argument(
+        "--template-rules",
+        metavar="<template_rules>",
+        type=str,
+        help="Yaml file with the rules that map the events to templates",
+        default=os.environ.get("TEMPLATE_RULES"),
     )
     render_events.add_argument(
         "input",
         metavar="<alchemy-input-json|txhash>",
         type=str,
         help="Alchemy JSON file or TX Transaction",
-    )
-    render_events.add_argument(
-        "template_rules",
-        metavar="<template_rules>",
-        type=str,
-        help="Yaml file with the rules that map the events to templates",
     )
     return parser.parse_args(args)
 
