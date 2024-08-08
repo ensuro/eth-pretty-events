@@ -1,6 +1,8 @@
+import operator
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, Optional
 
 from eth_pretty_events.address_book import get_default as get_addr_book
@@ -63,6 +65,20 @@ def _str_to_addr(value: str) -> Address:
             return address_value
 
 
+def transform_amount(val):
+    return int(Decimal(val) * Decimal(10**6))
+
+
+def transform_wad(val):
+    return int(Decimal(val) * Decimal(10**18))
+
+
+TRANSFORMS = {
+    "amount": transform_amount,
+    "wad": transform_wad,
+}
+
+
 @EventFilter.register("address")
 class AddressEventFilter(EventFilter):
     value: Address
@@ -98,9 +114,19 @@ class NameEventFilter(EventFilter):
 
 @EventFilter.register("arg")
 class ArgEventFilter(EventFilter):
-    def __init__(self, arg_name: str, arg_value: Any):
+    OPERATORS = {
+        "eq": operator.eq,
+        "lt": operator.lt,
+        "gt": operator.gt,
+        "le": operator.le,
+        "ge": operator.ge,
+        "ne": operator.ne,
+    }
+
+    def __init__(self, arg_name: str, arg_value: Any = None, operator: str = "eq", transform: str = None):
         self.arg_name = arg_name
-        self.arg_value = arg_value
+        self.arg_value = TRANSFORMS[transform](arg_value) if transform is not None else arg_value
+        self.operator = operator
 
     def _get_arg(self, evt: Event):
         arg_path = self.arg_name.split(".")
@@ -110,7 +136,10 @@ class ArgEventFilter(EventFilter):
         return ret
 
     def filter(self, evt: Event) -> bool:
-        return self._get_arg(evt) == self.arg_value
+        arg_value = self._get_arg(evt)
+        compare_func = self.OPERATORS[self.operator]
+        result = compare_func(arg_value, self.arg_value)
+        return result
 
 
 @EventFilter.register("arg_exists")
