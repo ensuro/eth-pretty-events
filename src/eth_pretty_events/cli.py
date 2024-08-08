@@ -1,25 +1,3 @@
-"""
-This is a skeleton file that can serve as a starting point for a Python
-console script. To run this script uncomment the following lines in the
-``[options.entry_points]`` section in ``setup.cfg``::
-
-    console_scripts =
-         fibonacci = eth_pretty_events.skeleton:run
-
-Then run ``pip install .`` (or ``pip install -e .`` for editable mode)
-which will install the command ``fibonacci`` inside your current environment.
-
-Besides console scripts, the header (i.e. until ``_logger``...) of this file can
-also be used as template for Python modules.
-
-Note:
-    This file can be renamed depending on your needs or safely removed if not needed.
-
-References:
-    - https://setuptools.pypa.io/en/latest/userguide/entry_point.html
-    - https://pip.pypa.io/en/stable/reference/pip_install
-"""
-
 import argparse
 import json
 import logging
@@ -48,13 +26,6 @@ __copyright__ = "Guillermo M. Narvaja"
 __license__ = "MIT"
 
 _logger = logging.getLogger(__name__)
-
-
-# ---- Python API ----
-# The functions defined in this section can be imported by users in their
-# Python scripts/interactive interpreter, e.g. via
-# `from eth_pretty_events.skeleton import fib`,
-# when using this Python module as a library.
 
 
 def load_events(args):
@@ -174,7 +145,7 @@ def render_events(renv: RenderingEnv, input: str):
         if renv.w3 is None:
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
         # It's a transaction hash
-        events = decode_events.decode_from_tx(input, renv.w3, renv.chain)
+        events = decode_events.decode_events_from_tx(input, renv.w3, renv.chain)
     elif input.isdigit():
         if renv.w3 is None:
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
@@ -282,6 +253,13 @@ def parse_args(args):
         help="Yaml file with the rules that map the events to templates",
         default=os.environ.get("TEMPLATE_RULES"),
     )
+    parser.add_argument(
+        "--discord-url",
+        type=str,
+        help="URL to send discord messages",
+        default=os.environ.get("DISCORD_URL"),
+    )
+
     subparsers = parser.add_subparsers(dest="command", required=True, help="sub-command to run")
 
     load_events = subparsers.add_parser("load_events")
@@ -334,6 +312,7 @@ def main(args):
         renv = setup_rendering_env(args)
         # TODO: rollbar setup?
         flask_app.app.config["renv"] = renv
+        flask_app.app.config["discord_url"] = args.discord_url
         if args.command == "flask_dev":
             flask_app.app.run(port=args.port)
         else:

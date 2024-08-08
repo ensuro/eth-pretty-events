@@ -1,6 +1,11 @@
-from flask import Flask
+import os
+from itertools import groupby
 
-from .decode_events import decode_events_from_tx
+import requests
+from flask import Flask, request
+
+from . import discord
+from .decode_events import decode_events_from_tx, decode_from_alchemy_input
 from .event_filter import find_template
 from .render import render
 from .types import Hash
@@ -8,11 +13,21 @@ from .types import Hash
 app = Flask("eth-pretty-events")
 
 
-@app.route("/alchemy-webhook/<webhook_id>/", methods=["POST"])
-def alchemy_webhook(webhook_id: str):
-    # TODO: I'm not sure if it's better to include the webhook_id in the URL, or always use the same URL
-    # and get the webhook_id from the json input.
-    pass
+@app.route("/alchemy-webhook/", methods=["POST"])
+def alchemy_webhook():
+    # TODO: validate signature
+    discord_url = app.config["discord_url"]
+    renv = app.config["renv"]
+    payload = request.json
+
+    responses = discord.build_and_send_messages(discord_url, renv, decode_from_alchemy_input(payload, renv.chain))
+
+    ok_messages = sum(1 for response in responses if response.status_code == 200)
+    failed_messages = len(responses) - ok_messages
+    status_description = "ok" if failed_messages == 0 else "error"
+
+    # TODO: do we want to fail if any of the messages fails? Possible flood of messages
+    return {"status": status_description, "ok_count": ok_messages, "failed_count": failed_messages}
 
 
 @app.route("/render/tx/<tx_hash>/", methods=["GET"])

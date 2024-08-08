@@ -17,7 +17,9 @@ def decode_from_alchemy_input(alchemy_input: dict, chain: Chain) -> Iterable[Opt
     )
     for alchemy_log in alchemy_block["logs"]:
         log = graphql_log_to_log_receipt(alchemy_log, alchemy_block)
-        yield EventDefinition.read_log(log, block=block)
+        parsed_log = EventDefinition.read_log(log, block=block)
+        if parsed_log is not None:
+            yield parsed_log
 
 
 def decode_events_from_tx(tx_hash: str, w3: Web3, chain: Chain) -> Iterable[Optional[Event]]:
