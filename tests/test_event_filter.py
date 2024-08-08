@@ -32,3 +32,91 @@ def test_shortcut_name():
 
     assert transfer_filter.filter(factories.Event(name="Transfer"))
     assert not transfer_filter.filter(factories.Event(name="OtherEvent"))
+
+
+def test_str_to_addr_not_in_book():
+    name = "not_found_name"
+    with pytest.raises(RuntimeError, match=f"Name {name} not found"):
+        event_filter._str_to_addr(name)
+
+
+def test_arg_exists_event_filter():
+    arg_exists_filter = event_filter.EventFilter.from_config(dict(filter_type="arg_exists", arg_name="existent"))
+    event_with_arg = factories.Event(args={"existent": "value"})
+    event_without_arg = factories.Event(args={})
+
+    assert arg_exists_filter.filter(event_with_arg)
+    assert not arg_exists_filter.filter(event_without_arg)
+
+
+def test_read_template_rules():
+    template_rules = {"rules": [{"template": "test_template", "match": [{"name": "Transfer"}, {"address": "USDC"}]}]}
+
+    rules = event_filter.read_template_rules(template_rules)
+    assert len(rules) == 1
+    assert rules[0].template == "test_template"
+    assert isinstance(rules[0].match, event_filter.AndEventFilter)
+
+
+def test_find_template():
+    template_rules = {"rules": [{"template": "test_template", "match": [{"name": "Transfer"}, {"address": "USDC"}]}]}
+
+    rules = event_filter.read_template_rules(template_rules)
+    transfer = factories.Event(name="Transfer", address=ADDRESSES["USDC"])
+    template = event_filter.find_template(rules, transfer)
+    assert template == "test_template"
+
+    new_policy = factories.Event(name="NewPolicy", address=ADDRESSES["USDC"])
+    template = event_filter.find_template(rules, new_policy)
+    assert template is None
+
+
+def test_read_template_rules_invalid_config():
+    template_rules = {"rules": [{"template": "test_template", "match": [{}]}]}
+
+    with pytest.raises(RuntimeError, match="Invalid filter config"):
+        event_filter.read_template_rules(template_rules)
+
+
+def test_and_filter():
+    config = {"and": [{"name": "Transfer"}, {"address": "USDC"}]}
+    and_filter = event_filter.EventFilter.from_config(config)
+    assert isinstance(and_filter, event_filter.AndEventFilter)
+
+    transfer_usdc_event = factories.Event(name="Transfer", address=ADDRESSES["USDC"])
+    other_event = factories.Event(name="OtherEvent", address=ADDRESSES["USDC"])
+
+    assert and_filter.filter(transfer_usdc_event)
+    assert not and_filter.filter(other_event)
+
+
+def test_or_filter():
+    config = {"or": [{"name": "Transfer"}, {"address": "USDC"}]}
+    or_filter = event_filter.EventFilter.from_config(config)
+    assert isinstance(or_filter, event_filter.OrEventFilter)
+
+    transfer_usdc_event = factories.Event(name="Transfer", address=ADDRESSES["USDC"])
+    transfer_other_event = factories.Event(name="Transfer", address=ADDRESSES["NATIVE_USDC"])
+    other_usdc_event = factories.Event(name="OtherEvent", address=ADDRESSES["USDC"])
+
+    assert or_filter.filter(transfer_usdc_event)
+    assert or_filter.filter(transfer_other_event)
+    assert or_filter.filter(other_usdc_event)
+
+
+def test_not_filter():
+    config = {"not": {"name": "Transfer"}}
+    not_filter = event_filter.EventFilter.from_config(config)
+    assert isinstance(not_filter, event_filter.NotEventFilter)
+
+    transfer_event = factories.Event(name="Transfer")
+    other_event = factories.Event(name="OtherEvent")
+
+    assert not not_filter.filter(transfer_event)
+    assert not_filter.filter(other_event)
+
+
+def test_invalid_filter_config():
+    config = {"invalid": {}}
+    with pytest.raises(RuntimeError, match=f"Invalid filter config {config}"):
+        event_filter.EventFilter.from_config(config)
