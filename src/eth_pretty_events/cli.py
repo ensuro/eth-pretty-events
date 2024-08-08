@@ -174,7 +174,7 @@ def render_events(renv: RenderingEnv, input: str):
         if renv.w3 is None:
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
         # It's a transaction hash
-        events = decode_events.decode_from_tx(input, renv.w3, renv.chain)
+        events = decode_events.decode_events_from_tx(input, renv.w3, renv.chain)
     elif input.isdigit():
         if renv.w3 is None:
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")

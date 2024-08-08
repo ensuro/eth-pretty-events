@@ -1,0 +1,88 @@
+[
+  {
+    "name": "Polygon Mainnet",
+    "chain": "Polygon",
+    "icon": "polygon",
+    "rpc": [
+      "https://polygon-rpc.com/",
+      "https://rpc-mainnet.matic.network",
+      "https://matic-mainnet.chainstacklabs.com",
+      "https://rpc-mainnet.maticvigil.com",
+      "https://rpc-mainnet.matic.quiknode.pro",
+      "https://matic-mainnet-full-rpc.bwarelabs.com",
+      "https://polygon-bor-rpc.publicnode.com",
+      "wss://polygon-bor-rpc.publicnode.com",
+      "https://polygon.gateway.tenderly.co",
+      "wss://polygon.gateway.tenderly.co",
+      "https://polygon.drpc.org",
+      "wss://polygon.drpc.org"
+    ],
+    "faucets": [],
+    "nativeCurrency": {
+      "name": "MATIC",
+      "symbol": "MATIC",
+      "decimals": 18
+    },
+    "infoURL": "https://polygon.technology/",
+    "shortName": "matic",
+    "chainId": 137,
+    "networkId": 137,
+    "slip44": 966,
+    "explorers": [
+      {
+        "name": "polygonscan",
+        "url": "https://polygonscan.com",
+        "standard": "EIP3091"
+      },
+      {
+        "name": "dexguru",
+        "url": "https://polygon.dex.guru",
+        "icon": "dexguru",
+        "standard": "EIP3091"
+      }
+    ]
+  },
+  {
+    "name": "Sepolia",
+    "title": "Ethereum Testnet Sepolia",
+    "chain": "ETH",
+    "rpc": [
+      "https://rpc.sepolia.org",
+      "https://rpc2.sepolia.org",
+      "https://rpc-sepolia.rockx.com",
+      "https://rpc.sepolia.ethpandaops.io",
+      "https://sepolia.infura.io/v3/${INFURA_API_KEY}",
+      "wss://sepolia.infura.io/v3/${INFURA_API_KEY}",
+      "https://sepolia.gateway.tenderly.co",
+      "wss://sepolia.gateway.tenderly.co",
+      "https://ethereum-sepolia-rpc.publicnode.com",
+      "wss://ethereum-sepolia-rpc.publicnode.com",
+      "https://sepolia.drpc.org",
+      "wss://sepolia.drpc.org",
+      "https://rpc-sepolia.rockx.com"
+    ],
+    "faucets": ["http://fauceth.komputing.org?chain=11155111&address=${ADDRESS}"],
+    "nativeCurrency": {
+      "name": "Sepolia Ether",
+      "symbol": "ETH",
+      "decimals": 18
+    },
+    "infoURL": "https://sepolia.otterscan.io",
+    "shortName": "sep",
+    "chainId": 11155111,
+    "networkId": 11155111,
+    "slip44": 1,
+    "explorers": [
+      {
+        "name": "etherscan-sepolia",
+        "url": "https://sepolia.etherscan.io",
+        "standard": "EIP3091"
+      },
+      {
+        "name": "otterscan-sepolia",
+        "url": "https://sepolia.otterscan.io",
+        "standard": "EIP3091"
+      }
+    ]
+  }
+]
