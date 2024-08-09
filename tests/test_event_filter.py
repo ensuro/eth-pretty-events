@@ -1,4 +1,7 @@
+from decimal import Decimal
+
 import pytest
+from web3.constants import ADDRESS_ZERO
 
 from eth_pretty_events import address_book, event_filter
 from eth_pretty_events.types import Address
@@ -40,6 +43,19 @@ def test_str_to_addr_not_in_book():
         event_filter._str_to_addr(name)
 
 
+def test_in_address_book_filter_true():
+    in_address_filter = event_filter.EventFilter.from_config(dict(filter_type="in_address", value=True))
+    event = factories.Event(address=ADDRESSES["USDC"])
+
+    assert in_address_filter.filter(event)
+
+
+def test_in_address_book_filter_false():
+    in_address_filter = event_filter.EventFilter.from_config(dict(filter_type="in_address", value=False))
+    event = factories.Event(address=Address(ADDRESS_ZERO))
+    assert in_address_filter.filter(event)
+
+
 def test_arg_exists_event_filter():
     arg_exists_filter = event_filter.EventFilter.from_config(dict(filter_type="arg_exists", arg_name="existent"))
     event_with_arg = factories.Event(args={"existent": "value"})
@@ -56,6 +72,15 @@ def test_read_template_rules():
     assert len(rules) == 1
     assert rules[0].template == "test_template"
     assert isinstance(rules[0].match, event_filter.AndEventFilter)
+
+    template_rules_single_match = {
+        "rules": [{"template": "test_template_single_match", "match": [{"name": "Transfer"}]}]
+    }
+
+    rules_single_match = event_filter.read_template_rules(template_rules_single_match)
+    assert len(rules_single_match) == 1
+    assert rules_single_match[0].template == "test_template_single_match"
+    assert isinstance(rules_single_match[0].match, event_filter.NameEventFilter)
 
 
 def test_find_template():
@@ -120,3 +145,109 @@ def test_invalid_filter_config():
     config = {"invalid": {}}
     with pytest.raises(RuntimeError, match=f"Invalid filter config {config}"):
         event_filter.EventFilter.from_config(config)
+
+
+def test_register_duplicate_filter_type():
+    type_register = "test_register"
+    event_filter.EventFilter.register(type_register)(event_filter.AddressEventFilter)
+
+    # Here we try to register another filter with the same type
+    with pytest.raises(ValueError, match=f"Duplicate filter type {type_register}"):
+        event_filter.EventFilter.register(type_register)(event_filter.NameEventFilter)
+
+
+def test_transform_amount():
+    assert event_filter.transform_amount("1.5") == int(Decimal("1.5") * Decimal(10**6))
+    assert event_filter.transform_amount("0") == 0
+    assert event_filter.transform_amount("123456.789") == int(Decimal("123456.789") * Decimal(10**6))
+
+
+def test_transform_wad():
+    assert event_filter.transform_wad("1.5") == int(Decimal("1.5") * Decimal(10**18))
+    assert event_filter.transform_wad("0") == 0
+    assert event_filter.transform_wad("123456.789") == int(Decimal("123456.789") * Decimal(10**18))
+
+
+@pytest.mark.parametrize(
+    "operator, arg_value, event_value, expected, transform, transform_fn",
+    [
+        ("eq", "1.5", "1.5", True, "amount", event_filter.transform_amount),
+        ("ne", "1.5", "2.0", True, "wad", event_filter.transform_wad),
+        ("lt", "1.5", "2.0", False, "amount", event_filter.transform_amount),
+        ("le", "1.5", "1.5", True, "wad", event_filter.transform_wad),
+        ("le", "1.5", "2.0", False, "amount", event_filter.transform_amount),
+        ("gt", "1.5", "1.0", False, "wad", event_filter.transform_wad),
+        ("ge", "1.5", "1.5", True, "amount", event_filter.transform_amount),
+        ("ge", "1.5", "1.0", False, "wad", event_filter.transform_wad),
+    ],
+)
+def test_arg_event_filter_with_transform(operator, arg_value, event_value, expected, transform, transform_fn):
+    arg_filter = event_filter.EventFilter.from_config(
+        dict(filter_type="arg", arg_name="value", arg_value=arg_value, operator=operator, transform=transform)
+    )
+    event = factories.Event(args={"value": transform_fn(event_value)})
+    assert arg_filter.filter(event) == expected
+
+    # Nested argument
+    nested_arg_filter = event_filter.EventFilter.from_config(
+        dict(filter_type="arg", arg_name="parent.child", arg_value=arg_value, operator=operator, transform=transform)
+    )
+    nested_event = factories.Event(args={"parent": {"child": transform_fn(event_value)}})
+    assert nested_arg_filter.filter(nested_event) == expected
+
+
+def test_arg_exists_event_filter_with_nested_args():
+    arg_exists_filter = event_filter.EventFilter.from_config(dict(filter_type="arg_exists", arg_name="parent.child"))
+
+    event_with_nested_arg = factories.Event(args={"parent": {"child": "value"}})
+    assert arg_exists_filter.filter(event_with_nested_arg)
+
+    event_without_nested_arg = factories.Event(args={"parent": {}})
+    assert not arg_exists_filter.filter(event_without_nested_arg)
+
+    event_with_arg = factories.Event(args={})
+    assert not arg_exists_filter.filter(event_with_arg)
+
+    event_with_different_nested_arg = factories.Event(args={"parent": {"other_child": "value"}})
+    assert not arg_exists_filter.filter(event_with_different_nested_arg)
+
+
+def test_address_arg_event_filter():
+    addr_arg_filter = event_filter.EventFilter.from_config(
+        dict(filter_type="address_arg", arg_name="user", arg_value="USDC")
+    )
+
+    assert isinstance(addr_arg_filter, event_filter.AddressArgEventFilter)
+    assert addr_arg_filter.arg_value == ADDRESSES["USDC"]
+
+    event = factories.Event(args={"user": ADDRESSES["USDC"]})
+    assert addr_arg_filter.filter(event)
+
+    event2 = factories.Event(args={"user": ADDRESS_ZERO})
+    assert not addr_arg_filter.filter(event2)
+
+
+def test_in_address_book_arg_event_filter():
+    in_addr_book_arg_filter = event_filter.EventFilter.from_config(
+        dict(filter_type="in_address_arg", arg_name="user", arg_value=True)
+    )
+
+    assert isinstance(in_addr_book_arg_filter, event_filter.InAddressBookArgEventFilter)
+    assert in_addr_book_arg_filter.arg_value is True
+
+    event1 = factories.Event(args={"user": ADDRESSES["USDC"]})
+    assert in_addr_book_arg_filter.filter(event1)
+
+    event2 = factories.Event(args={"user": ADDRESS_ZERO})
+    assert not in_addr_book_arg_filter.filter(event2)
+
+
+def test_true_event_filter():
+    true_filter = event_filter.EventFilter.from_config(dict(filter_type="true"))
+    assert isinstance(true_filter, event_filter.TrueEventFilter)
+
+    event1 = factories.Event(name="Event1", address=ADDRESSES["USDC"])
+    event2 = factories.Event(name="Event2", address=ADDRESSES["NATIVE_USDC"])
+
+    assert true_filter.filter(event1)
+    assert true_filter.filter(event2)

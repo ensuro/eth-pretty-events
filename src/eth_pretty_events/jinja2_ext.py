@@ -62,9 +62,9 @@ def block_link(env, value: int):
 
 @pass_environment
 def address_link(env, address: Address):
+    if address == ADDRESS_ZERO:
+        return f"[{address}]"
     address_text = _address(address)
-    if address_text == ADDRESS_ZERO:
-        return f"[{address_text}]"
     url = _explorer_url(env)
     return f"[{address_text}]({url}/address/{address})"
 
@@ -84,12 +84,12 @@ def autoformat_arg(env, arg_value, arb_abi):
     if arb_abi["type"] == "uint256" and arb_abi["name"] in ("policy.start", "timestamp"):
         return timestamp(arg_value)
     if arb_abi["type"] == "uint256" and arb_abi["name"] in ("policy.lossProb", "loss_prob"):
-        return timestamp(arg_value)
+        return loss_prob(arg_value)
     return arg_value
 
 
 def loss_prob(value):
-    return Decimal(value) / Decimal(10**18)
+    return str(Decimal(value) / Decimal(10**18))
 
 
 def timestamp(value):
