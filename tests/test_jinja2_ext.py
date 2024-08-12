@@ -10,6 +10,7 @@ from eth_pretty_events.jinja2_ext import (
     address_link,
     autoformat_arg,
     block_link,
+    is_tuple,
     role,
     tx_link,
 )
@@ -184,6 +185,22 @@ def test_explorer_url(chain_id, chains_data, expected_result, expected_exception
 
 
 @pytest.mark.parametrize(
+    "input_value, expected_output",
+    [
+        ((1, 2, 3), True),
+        ([1, 2, 3], False),
+        ("string", False),
+        ({"key": "value"}, False),
+        (123, False),
+        (None, False),
+    ],
+)
+def test_is_tuple(input_value, expected_output):
+    result = is_tuple(input_value)
+    assert result == expected_output
+
+
+@pytest.mark.parametrize(
     "arg_value, arg_abi, expected_output",
     [
         (
@@ -204,8 +221,11 @@ def test_explorer_url(chain_id, chains_data, expected_result, expected_exception
         (1234567890, {"type": "uint256", "name": "amount"}, "1234.56789"),
         (289254654977, {"type": "uint256", "name": "amount"}, "2.89254654977E-7"),
         (2**256 - 1, {"type": "uint256", "name": "amount"}, "infinite"),
-        (1234567890, {"type": "uint256", "name": "timestamp"}, "2009-02-13T23:31:30Z"),
-        (10**18, {"type": "uint256", "name": "loss_prob"}, "1"),
+        (1234567890, {"type": "uint40", "name": "timestamp"}, "2009-02-13T23:31:30Z"),
+        (1723044031, {"type": "uint40", "name": "start"}, "2024-08-07T15:20:31Z"),
+        (1723189500, {"type": "uint40", "name": "expiration"}, "2024-08-09T07:45:00Z"),
+        (10**18, {"type": "uint256", "name": "lossProb"}, "1"),
+        (68000000000000000, {"type": "uint256", "name": "loss_prob"}, "0.068"),
         ("arbitrary_value", {"type": "unknown"}, "arbitrary_value"),
         ("no_format_should_not_happen", None, "no_format_should_not_happen"),
     ],
@@ -236,7 +256,7 @@ def test_add_filters():
         "unhash",
         "role",
         "timestamp",
-        "loss_prob",
+        "ratio_wad",
     ]
 
     addr_book = AddrToNameAddressBook({"0x1234567890abcdef1234567890abcdef12345678": "Mocked Name"})
@@ -285,6 +305,6 @@ def test_add_filters():
     rendered = template.render()
     assert rendered == "2009-02-13T23:31:30Z"
 
-    template = env.from_string("{{ 1000000000000000000 | loss_prob }}")
+    template = env.from_string("{{ 1000000000000000000 | ratio_wad }}")
     rendered = template.render()
     assert rendered == "1"

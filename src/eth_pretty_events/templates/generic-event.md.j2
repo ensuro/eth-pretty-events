@@ -1,8 +1,17 @@
-## {{evt.name}}
-TX: {{evt.tx.hash | tx_link }}
-Block: {{evt.tx.block.number | block_link }}
-Contract: {{evt.address|address_link}}
+## {{ evt.name }}
+**TX:** {{ evt.tx.hash | tx_link }}
+**Block:** {{ evt.tx.block.number | block_link }}
+**Contract:** {{ evt.address | address_link }}
+
+**Arguments**
 {% for arg_name in evt.args._abi_fields() %}
-Arg: {{ arg_name }}
-Arg value: {{ evt.args[arg_name] | autoformat_arg(evt.args._field_abi(arg_name)) }}
+**Arg:** {{ arg_name }}
+{% if is_tuple(evt.args[arg_name]) %}
+  {% for sub_arg_name in evt.args[arg_name]._abi_fields() %}
+  - {{ sub_arg_name }}: {{ evt.args[arg_name][sub_arg_name] | autoformat_arg(evt.args[arg_name]._field_abi(sub_arg_name)) }}
+  {% endfor %}
+{% else %}
+- **Value:** {{ evt.args[arg_name] | autoformat_arg(evt.args._field_abi(arg_name)) }}
+{% endif %}
+
 {% endfor %}

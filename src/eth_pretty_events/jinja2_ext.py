@@ -69,26 +69,34 @@ def address_link(env, address: Address):
     return f"[{address_text}]({url}/address/{address})"
 
 
+def is_tuple(value):
+    return isinstance(value, tuple)
+
+
 @pass_environment
-def autoformat_arg(env, arg_value, arb_abi):
-    if not arb_abi:
-        return arg_value  # Shouldn't happend but I just return without any formating
-    if arb_abi["type"] == "address":
+def autoformat_arg(env, arg_value, arg_abi):
+    if not arg_abi:
+        return arg_value
+
+    field_name = arg_abi.get("name", "")
+
+    if arg_abi["type"] == "address":
         return address_link(env, arg_value)
-    if arb_abi["type"] == "bytes32" and arb_abi["name"] == "role":
+    if arg_abi["type"] == "bytes32" and field_name == "role":
         return role(env, arg_value)
-    if arb_abi["type"] == "bytes32":
+    if arg_abi["type"] == "bytes32":
         return unhash(env, arg_value)
-    if arb_abi["type"] == "uint256" and arb_abi["name"] in ("value", "amount"):
+    if arg_abi["type"] in ("uint256", "uint40") and field_name in ("value", "amount"):
         return amount(arg_value)
-    if arb_abi["type"] == "uint256" and arb_abi["name"] in ("policy.start", "timestamp"):
+    if arg_abi["type"] in ("uint40") and field_name in ("start", "timestamp", "expiration"):
         return timestamp(arg_value)
-    if arb_abi["type"] == "uint256" and arb_abi["name"] in ("policy.lossProb", "loss_prob"):
-        return loss_prob(arg_value)
+    if arg_abi["type"] in ("uint256") and field_name in ("lossProb", "loss_prob"):
+        return ratio_wad(arg_value)
+
     return arg_value
 
 
-def loss_prob(value):
+def ratio_wad(value):
     return str(Decimal(value) / Decimal(10**18))
 
 
@@ -111,5 +119,6 @@ def amount(value, decimals="auto"):
 
 
 def add_filters(env: Environment):
-    for fn in [amount, address, tx_link, block_link, address_link, autoformat_arg, unhash, role, timestamp, loss_prob]:
+    for fn in [amount, address, tx_link, block_link, address_link, autoformat_arg, unhash, role, timestamp, ratio_wad]:
         env.filters[fn.__name__] = fn
+    env.globals["is_tuple"] = is_tuple
