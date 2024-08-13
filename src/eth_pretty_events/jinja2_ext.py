@@ -63,7 +63,7 @@ def block_link(env, value: int):
 @pass_environment
 def address_link(env, address: Address):
     if address == ADDRESS_ZERO:
-        return f"[{address}]"
+        return "0x0"
     address_text = _address(address)
     url = _explorer_url(env)
     return f"[{address_text}]({url}/address/{address})"

@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 import pytest
+from eth_utils import keccak, to_checksum_address
 from web3.constants import ADDRESS_ZERO
 
 from eth_pretty_events import address_book, event_filter
@@ -168,6 +169,26 @@ def test_transform_wad():
     assert event_filter.transform_wad("123456.789") == int(Decimal("123456.789") * Decimal(10**18))
 
 
+def test_transform_keccak():
+    assert event_filter.transform_keccak("example") == keccak(text="example").hex()
+    assert event_filter.transform_keccak("") == keccak(text="").hex()
+    assert event_filter.transform_keccak("another_string") == keccak(text="another_string").hex()
+
+
+def test_transform_address():
+
+    result = event_filter.transform_address("USDC")
+    expected_address = to_checksum_address("0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174")
+    assert result == expected_address
+
+    result_incorrect_address = event_filter.transform_address("USDM")
+    not_expected_address = to_checksum_address("0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359")
+    assert not result_incorrect_address == not_expected_address
+
+    result_non_existing = event_filter.transform_address("non_existing_address")
+    assert result_non_existing == "non_existing_address"
+
+
 @pytest.mark.parametrize(
     "operator, arg_value, event_value, expected, transform, transform_fn",
     [
@@ -210,21 +231,6 @@ def test_arg_exists_event_filter_with_nested_args():
 
     event_with_different_nested_arg = factories.Event(args={"parent": {"other_child": "value"}})
     assert not arg_exists_filter.filter(event_with_different_nested_arg)
-
-
-def test_address_arg_event_filter():
-    addr_arg_filter = event_filter.EventFilter.from_config(
-        dict(filter_type="address_arg", arg_name="user", arg_value="USDC")
-    )
-
-    assert isinstance(addr_arg_filter, event_filter.AddressArgEventFilter)
-    assert addr_arg_filter.arg_value == ADDRESSES["USDC"]
-
-    event = factories.Event(args={"user": ADDRESSES["USDC"]})
-    assert addr_arg_filter.filter(event)
-
-    event2 = factories.Event(args={"user": ADDRESS_ZERO})
-    assert not addr_arg_filter.filter(event2)
 
 
 def test_in_address_book_arg_event_filter():

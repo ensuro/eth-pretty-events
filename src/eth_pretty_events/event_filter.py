@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Optional
 
+from eth_utils import keccak, to_checksum_address
+
 from eth_pretty_events.address_book import get_default as get_addr_book
 from eth_pretty_events.types import Address, Event
 
@@ -73,9 +75,22 @@ def transform_wad(val):
     return int(Decimal(val) * Decimal(10**18))
 
 
+def transform_keccak(val: str) -> str:
+    return keccak(text=val).hex()
+
+
+def transform_address(val: str) -> str:
+    address = get_addr_book().name_to_addr(val)
+    if address:
+        return to_checksum_address(address)
+    return val
+
+
 TRANSFORMS = {
     "amount": transform_amount,
     "wad": transform_wad,
+    "keccak": transform_keccak,
+    "address": transform_address,
 }
 
 
@@ -162,12 +177,6 @@ class ArgExistsEventFilter(EventFilter):
 
     def filter(self, evt: Event) -> bool:
         return self._get_arg(evt) is not None
-
-
-@EventFilter.register("address_arg")
-class AddressArgEventFilter(ArgEventFilter):
-    def __init__(self, arg_name: str, arg_value: Any):
-        return super().__init__(arg_name, _str_to_addr(arg_value))
 
 
 @EventFilter.register("in_address_arg")

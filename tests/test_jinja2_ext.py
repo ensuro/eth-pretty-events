@@ -108,7 +108,7 @@ def test_link_functions(link_function, value, chain_id, chains_data, expected_su
             ADDRESS_ZERO,
             1,
             {1: {"name": "Ethereum", "explorers": [{"url": "https://etherscan.io"}]}},
-            f"[{ADDRESS_ZERO}]",
+            "0x0",
             None,
         ),
         (
@@ -238,6 +238,7 @@ def test_autoformat_arg(arg_value, arg_abi, expected_output):
     addr_book = AddrToNameAddressBook({"0x1234567890abcdef1234567890abcdef12345678": "Mocked Name"})
     setup_default(addr_book)
 
+    # Llamar a `autoformat_arg` con solo `arg_value` y `arg_abi`, sin `env`
     result = autoformat_arg(env, arg_value, arg_abi)
     assert result == expected_output
 

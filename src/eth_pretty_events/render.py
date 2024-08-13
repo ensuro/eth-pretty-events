@@ -21,5 +21,6 @@ def init_environment(
 
 
 def render(env: Environment, event: Event, template_name: str):
+    print()
     template = env.get_template(template_name)
     return template.render(evt=event)
