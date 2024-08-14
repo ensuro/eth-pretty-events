@@ -1,7 +1,3 @@
-import os
-from itertools import groupby
-
-import requests
 from flask import Flask, request
 
 from . import discord
@@ -26,7 +22,7 @@ def alchemy_webhook():
     failed_messages = len(responses) - ok_messages
     status_description = "ok" if failed_messages == 0 else "error"
 
-    # TODO: do we want to fail if any of the messages fails? Possible flood of messages
+    # TODO: do we want to fail if any of the messages fails? Probably not as it will cause a flood of repeated messages
     return {"status": status_description, "ok_count": ok_messages, "failed_count": failed_messages}
 
 
