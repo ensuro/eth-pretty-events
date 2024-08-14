@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import sys
 from collections import namedtuple
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -22,6 +23,7 @@ from eth_pretty_events.cli import (
     _setup_web3,
     load_events,
     main,
+    run,
 )
 from eth_pretty_events.types import Event
 
@@ -56,10 +58,8 @@ def setup_address_book():
     args = MagicMock()
     args.address_book = "samples/address-book.json"
 
-    # Llama a _setup_address_book
     _setup_address_book(args, None)
 
-    # Devuelve el address book configurado
     return address_book.get_default()
 
 
@@ -113,21 +113,21 @@ def test_setup_web3_with_extra_data_length_error(mock_web3, mock_http_provider):
 @pytest.mark.parametrize(
     "args_chain_id, w3_chain_id, expected_chain_id, should_raise_error, error_message",
     [
-        (None, 137, 137, False, None),  # Caso cuando `args.chain_id` es None y se usa el `chain_id` de `w3`
+        (None, 137, 137, False, None),
         (
             None,
             None,
             None,
             True,
             "Either --chain-id or --rpc-url must be specified",
-        ),  # Caso cuando ambos `args.chain_id` y `w3` son None, debería lanzar error
+        ),
         (
             137,
             1,
             None,
             True,
             "differs with the id of the RPC connection",
-        ),  # Caso cuando `args.chain_id` y `w3.eth.chain_id` no coinciden, debería lanzar error
+        ),
     ],
 )
 def test_env_globals_chain_id(args_chain_id, w3_chain_id, expected_chain_id, should_raise_error, error_message):
@@ -187,16 +187,17 @@ def test_setup_address_book_inverted():
     "bytes32_rainbow_file, chains_file, expected_subset_b32, expected_subset_chains",
     [
         (
-            "samples/knownRoles.json",
-            "samples/chains.json",
+            "samples/known-roles.json",
+            "samples/reduced-chains.json",
             {
                 "0x55435dd261a4b9b3364963f7738a7a662ad9c84396d64be3365284bb7f0a5041": "GUARDIAN_ROLE",
                 "0x499b8dbdbe4f7b12284c4a222a9951ce4488b43af4d09f42655d67f73b612fe1": "SWAP_ROLE",
             },
             {
                 1: {"chainId": 1, "name": "Ethereum Mainnet"},
-                2: {"chainId": 2, "name": "Expanse Network"},
-                3: {"chainId": 3, "name": "Ropsten"},
+                10: {"chainId": 10, "name": "OP Mainnet"},
+                56: {"chainId": 56, "name": "BNB Smart Chain Mainnet"},
+                137: {"chainId": 137, "name": "Polygon Mainnet"},
             },
         ),
         (None, None, {}, {}),
@@ -297,3 +298,57 @@ def test_env_int_with_value():
     with patch.dict(os.environ, {}, clear=True):
         result = _env_int("TEST_INT")
         assert result is None
+
+
+def test_main_with_command(capsys):
+
+    with patch("eth_pretty_events.cli.load_events") as mock_load_events, patch(
+        "eth_pretty_events.cli.render_events"
+    ) as mock_render_events:
+
+        mock_load_events.return_value = 25
+        main(["load_events", str(os.path.dirname(__file__) / Path("abis"))])
+        captured = capsys.readouterr()
+        assert "25 events found" in captured.out
+        mock_load_events.assert_called_once()
+
+        mock_load_events.reset_mock()
+        mock_render_events.reset_mock()
+
+        main(["render_events", str(os.path.dirname(__file__) / Path("events"))])
+        captured = capsys.readouterr()
+        assert "events found" not in captured.out
+        mock_render_events.assert_called_once()
+
+        with pytest.raises(SystemExit):
+            main(["invalid_command"])
+
+        captured = capsys.readouterr()
+        assert "Script ends here" not in captured.out
+
+
+def test_run_with_load_events():
+    test_args = ["run.py", "load_events", "path/to/abis"]
+
+    with patch.object(sys, "argv", test_args):
+        with patch("eth_pretty_events.cli.main") as mock_main:
+            run()
+            mock_main.assert_called_once_with(["load_events", "path/to/abis"])
+
+
+def test_run_with_render_events():
+    test_args = ["run.py", "render_events", "path/to/events"]
+
+    with patch.object(sys, "argv", test_args):
+        with patch("eth_pretty_events.cli.main") as mock_main:
+            run()
+            mock_main.assert_called_once_with(["render_events", "path/to/events"])
+
+
+def test_run_with_no_arguments():
+    test_args = ["run.py"]
+
+    with patch.object(sys, "argv", test_args):
+        with patch("eth_pretty_events.cli.main") as mock_main:
+            run()
+            mock_main.assert_called_once_with([])

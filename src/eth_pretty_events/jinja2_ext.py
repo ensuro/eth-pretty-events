@@ -5,7 +5,7 @@ from jinja2 import Environment, pass_environment
 from web3.constants import ADDRESS_ZERO
 
 from .address_book import get_default as get_addr_book
-from .types import Address, Hash
+from .types import ABITupleMixin, Address, Hash
 
 MAX_UINT = 2**256 - 1
 
@@ -69,8 +69,8 @@ def address_link(env, address: Address):
     return f"[{address_text}]({url}/address/{address})"
 
 
-def is_tuple(value):
-    return isinstance(value, tuple)
+def struct(value):  # is_struct
+    return isinstance(value, ABITupleMixin)
 
 
 @pass_environment
@@ -86,13 +86,10 @@ def autoformat_arg(env, arg_value, arg_abi):
         return role(env, arg_value)
     if arg_abi["type"] == "bytes32":
         return unhash(env, arg_value)
-    if arg_abi["type"] in ("uint256", "uint40") and field_name in ("value", "amount"):
+    if arg_abi["type"] in ("uint256") and field_name in ("amount"):
         return amount(arg_value)
-    if arg_abi["type"] in ("uint40") and field_name in ("start", "timestamp", "expiration"):
+    if arg_abi["type"] in ("uint40"):
         return timestamp(arg_value)
-    if arg_abi["type"] in ("uint256") and field_name in ("lossProb", "loss_prob"):
-        return ratio_wad(arg_value)
-
     return arg_value
 
 
@@ -119,6 +116,22 @@ def amount(value, decimals="auto"):
 
 
 def add_filters(env: Environment):
-    for fn in [amount, address, tx_link, block_link, address_link, autoformat_arg, unhash, role, timestamp, ratio_wad]:
+    for fn in [
+        amount,
+        address,
+        tx_link,
+        block_link,
+        address_link,
+        autoformat_arg,
+        unhash,
+        role,
+        timestamp,
+        ratio_wad,
+        struct,
+    ]:
         env.filters[fn.__name__] = fn
-    env.globals["is_tuple"] = is_tuple
+
+
+def add_tests(env: Environment):
+    for fn in [struct]:
+        env.tests[fn.__name__] = fn

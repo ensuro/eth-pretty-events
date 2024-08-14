@@ -180,13 +180,9 @@ def test_transform_address():
     result = event_filter.transform_address("USDC")
     expected_address = to_checksum_address("0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174")
     assert result == expected_address
-
-    result_incorrect_address = event_filter.transform_address("USDM")
-    not_expected_address = to_checksum_address("0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359")
-    assert not result_incorrect_address == not_expected_address
-
-    result_non_existing = event_filter.transform_address("non_existing_address")
-    assert result_non_existing == "non_existing_address"
+    non_existing_name = "non_existing"
+    with pytest.raises(RuntimeError, match=f"Address for name {non_existing_name} not found"):
+        event_filter.transform_address(non_existing_name)
 
 
 @pytest.mark.parametrize(

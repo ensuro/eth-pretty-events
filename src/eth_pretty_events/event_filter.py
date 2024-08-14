@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Optional
 
-from eth_utils import keccak, to_checksum_address
+from eth_utils import keccak
 
 from eth_pretty_events.address_book import get_default as get_addr_book
 from eth_pretty_events.types import Address, Event
@@ -79,11 +79,11 @@ def transform_keccak(val: str) -> str:
     return keccak(text=val).hex()
 
 
-def transform_address(val: str) -> str:
+def transform_address(val: str) -> Address:
     address = get_addr_book().name_to_addr(val)
-    if address:
-        return to_checksum_address(address)
-    return val
+    if address is None:
+        raise RuntimeError(f"Address for name {val} not found")
+    return address
 
 
 TRANSFORMS = {

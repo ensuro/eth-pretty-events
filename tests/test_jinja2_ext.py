@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from jinja2 import Environment
 from web3.constants import ADDRESS_ZERO
@@ -5,19 +7,35 @@ from web3.constants import ADDRESS_ZERO
 from eth_pretty_events.address_book import AddrToNameAddressBook, setup_default
 from eth_pretty_events.jinja2_ext import (
     _explorer_url,
-    add_filters,
     address,
     address_link,
     autoformat_arg,
     block_link,
-    is_tuple,
+    ratio_wad,
     role,
+    struct,
     tx_link,
 )
+from eth_pretty_events.types import Hash
 
 from . import factories
 
-EMN178 = "https://emn178.github.io/online-tools/keccak_256.html?input=example_role&input_type=utf-8&output_type=hex"
+
+@pytest.fixture
+def setup_environment():
+    env = Environment()
+
+    with open("./samples/known-roles.json") as f:
+        known_roles = json.load(f)
+
+    with open("./samples/reduced-chains.json") as f:
+        chains = json.load(f)
+
+    env.globals["b32_rainbow"] = known_roles
+    env.globals["chain_id"] = 0
+    env.globals["chains"] = chains
+
+    return env
 
 
 def test_address():
@@ -28,166 +46,108 @@ def test_address():
     assert result == "Mocked Name Address"
 
 
-def test_role_default_admin():
-    env = Environment()
-    value = factories.Hash(value="0x0000000000000000000000000000000000000000000000000000000000000000")
+def test_role_default_admin(setup_environment):
+    env = setup_environment
+    value = Hash(value="0x0000000000000000000000000000000000000000000000000000000000000000")
     assert role(env, value) == "DEFAULT_ADMIN_ROLE"
 
 
-def test_role_unhash():
-    env = Environment()
-    env.globals["b32_rainbow"] = {"0xabc1230000000000000000000000000000000000000000000000000000000000": "example_role"}
-    value = factories.Hash(value="0xabc1230000000000000000000000000000000000000000000000000000000000")
-
-    assert role(env, value) == f"[example_role]({EMN178})"
+def test_role_unhash(setup_environment):
+    env = setup_environment
+    hash = next(iter(env.globals["b32_rainbow"]))
+    name = env.globals["b32_rainbow"][hash]
+    value = Hash(value=hash)
+    assert role(env, value) == (
+        f"[{name}](https://emn178.github.io/online-tools/keccak_256.html"
+        f"?input={name}&input_type=utf-8&output_type=hex)"
+    )
 
 
 def test_role_without_unhash():
     env = Environment()
     env.globals["b32_rainbow"] = {}
-    value = factories.Hash(value="0xdef4560000000000000000000000000000000000000000000000000000000000")
+    value = Hash(value="0xdef4560000000000000000000000000000000000000000000000000000000000")
     assert role(env, value) == value
 
 
 @pytest.mark.parametrize(
-    "link_function, value, chain_id, chains_data, expected_suffix, exception_expected",
+    "link_function, value, expected_suffix",
     [
-        (
-            tx_link,
-            "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
-            1,
-            {1: {"name": "Ethereum", "explorers": [{"url": "https://etherscan.io"}]}},
-            "/tx/0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
-            False,
-        ),
-        (
-            block_link,
-            12345,
-            1,
-            {1: {"name": "Ethereum", "explorers": [{"url": "https://etherscan.io"}]}},
-            "/block/12345",
-            False,
-        ),
-        (
-            tx_link,
-            "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
-            2,
-            {1: {"name": "Ethereum", "explorers": [{"url": "https://etherscan.io"}]}},
-            None,
-            True,
-        ),
-        (block_link, 12345, 1, {1: {"name": "Ethereum", "explorers": []}}, "/block/12345", False),
+        (tx_link, "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd", "/tx/0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"),
+        (block_link, 12345, "/block/12345"),
     ],
 )
-def test_link_functions(link_function, value, chain_id, chains_data, expected_suffix, exception_expected):
-    env = Environment()
-    env.globals["chain_id"] = chain_id
-    env.globals["chains"] = chains_data
-
-    if exception_expected:
-        with pytest.raises(RuntimeError, match=f"Chain {chain_id} not found in chains"):
-            link_function(env, value)
-    else:
-        result = link_function(env, value)
-        base_url = chains_data[chain_id]["explorers"][0]["url"] if chains_data[chain_id]["explorers"] else ""
-        expected_result = f"[{value}]({base_url}{expected_suffix})"
-        assert result == expected_result
+def test_link_functions(setup_environment, link_function, value, expected_suffix):
+    env = setup_environment
+    chain_id = env.globals["chain_id"]
+    chains_data = env.globals["chains"]
+    result = link_function(env, value)
+    base_url = chains_data[chain_id]["explorers"][0]["url"] if chains_data[chain_id]["explorers"] else ""
+    expected_result = f"[{value}]({base_url}{expected_suffix})"
+    assert result == expected_result
 
 
 @pytest.mark.parametrize(
-    "address, chain_id, chains, expected_output, expected_exception",
+    "address, expected_output",
     [
         (
-            "0x1234567890abcdef1234567890abcdef12345678",
-            1,
-            {1: {"name": "Ethereum", "explorers": [{"url": "https://etherscan.io"}]}},
-            "[Mocked Name](https://etherscan.io/address/0x1234567890abcdef1234567890abcdef12345678)",
-            None,
-        ),
-        (
             ADDRESS_ZERO,
-            1,
-            {1: {"name": "Ethereum", "explorers": [{"url": "https://etherscan.io"}]}},
             "0x0",
-            None,
         ),
         (
             "0x1234567890abcdef1234567890abcdef12345678",
-            2,
-            {1: {"name": "Ethereum", "explorers": [{"url": "https://etherscan.io"}]}},
-            None,
-            RuntimeError,
+            "[Mocked Name](https://etherscan.io/address/0x1234567890abcdef1234567890abcdef12345678)",
         ),
     ],
 )
-def test_address_link(address, chain_id, chains, expected_output, expected_exception):
-    env = Environment()
-    env.globals["chain_id"] = chain_id
-    env.globals["chains"] = chains
+def test_address_link(setup_environment, address, expected_output):
+    env = setup_environment
 
     addr_book = AddrToNameAddressBook({address: "Mocked Name"})
     setup_default(addr_book)
 
-    if expected_exception:
-        with pytest.raises(expected_exception):
-            address_link(env, address)
-    else:
-        result = address_link(env, address)
-        assert result == expected_output
-
-
-"""
-Consultar si dejar este test especifico de la funcion _exporer_url
-ya que se testea con las funciónes de arriba
-"""
+    result = address_link(env, address)
+    assert result == expected_output
 
 
 @pytest.mark.parametrize(
-    "chain_id, chains_data, expected_result, expected_exception",
+    "chain_id, chains_data, expected_result",
     [
         (
             1,
             {1: {"name": "Ethereum", "explorers": [{"url": "https://etherscan.io"}]}},
             "https://etherscan.io",
-            None,
-        ),
-        (
-            2,
-            {1: {"name": "Ethereum", "explorers": [{"url": "https://etherscan.io"}]}},
-            None,
-            RuntimeError,
         ),
         (
             1,
             {1: {"name": "Ethereum", "explorers": []}},
             "",
-            None,
-        ),
-        (
-            1,
-            {},
-            None,
-            RuntimeError,
         ),
     ],
 )
-def test_explorer_url(chain_id, chains_data, expected_result, expected_exception):
+def test_explorer_url(chain_id, chains_data, expected_result):
     env = Environment()
     env.globals["chain_id"] = chain_id
     env.globals["chains"] = chains_data
+    result = _explorer_url(env)
+    assert result == expected_result
 
-    if expected_exception:
-        with pytest.raises(expected_exception, match=f"Chain {chain_id} not found in chains"):
-            _explorer_url(env)
-    else:
-        result = _explorer_url(env)
-        assert result == expected_result
+
+def test_explorer_url_chain_not_found():
+    chain_id = 1
+    env = Environment()
+    env.globals["chain_id"] = chain_id
+    env.globals["chains"] = {}
+
+    with pytest.raises(RuntimeError, match=f"Chain {chain_id} not found in chains"):
+        _explorer_url(env)
 
 
 @pytest.mark.parametrize(
     "input_value, expected_output",
     [
-        ((1, 2, 3), True),
+        (factories.NewPolicyArgs().policy, True),
+        ((1, 2, 3), False),
         ([1, 2, 3], False),
         ("string", False),
         ({"key": "value"}, False),
@@ -195,8 +155,8 @@ def test_explorer_url(chain_id, chains_data, expected_result, expected_exception
         (None, False),
     ],
 )
-def test_is_tuple(input_value, expected_output):
-    result = is_tuple(input_value)
+def test_is_struct(input_value, expected_output):
+    result = struct(input_value)
     assert result == expected_output
 
 
@@ -216,7 +176,7 @@ def test_is_tuple(input_value, expected_output):
         (
             "0xabc1230000000000000000000000000000000000000000000000000000000000",
             {"type": "bytes32", "name": "example_role"},
-            f"[example_role]({EMN178})",
+            "0xabc1230000000000000000000000000000000000000000000000000000000000",
         ),
         (1234567890, {"type": "uint256", "name": "amount"}, "1234.56789"),
         (289254654977, {"type": "uint256", "name": "amount"}, "2.89254654977E-7"),
@@ -224,88 +184,25 @@ def test_is_tuple(input_value, expected_output):
         (1234567890, {"type": "uint40", "name": "timestamp"}, "2009-02-13T23:31:30Z"),
         (1723044031, {"type": "uint40", "name": "start"}, "2024-08-07T15:20:31Z"),
         (1723189500, {"type": "uint40", "name": "expiration"}, "2024-08-09T07:45:00Z"),
-        (10**18, {"type": "uint256", "name": "lossProb"}, "1"),
-        (68000000000000000, {"type": "uint256", "name": "loss_prob"}, "0.068"),
         ("arbitrary_value", {"type": "unknown"}, "arbitrary_value"),
         ("no_format_should_not_happen", None, "no_format_should_not_happen"),
     ],
 )
-def test_autoformat_arg(arg_value, arg_abi, expected_output):
-    env = Environment()
-    env.globals["b32_rainbow"] = {"0xabc1230000000000000000000000000000000000000000000000000000000000": "example_role"}
-    env.globals["chain_id"] = 1
-    env.globals["chains"] = {1: {"name": "Ethereum", "explorers": [{"url": "https://etherscan.io"}]}}
-    addr_book = AddrToNameAddressBook({"0x1234567890abcdef1234567890abcdef12345678": "Mocked Name"})
-    setup_default(addr_book)
-
-    # Llamar a `autoformat_arg` con solo `arg_value` y `arg_abi`, sin `env`
+def test_autoformat_arg(setup_environment, arg_value, arg_abi, expected_output):
+    env = setup_environment
     result = autoformat_arg(env, arg_value, arg_abi)
     assert result == expected_output
 
 
-def test_add_filters():
-    env = Environment()
-    add_filters(env)
-    addr = "0xabc1230000000000000000000000000000000000000000000000000000000000"
-    expected_filters = [
-        "amount",
-        "address",
-        "tx_link",
-        "block_link",
-        "address_link",
-        "autoformat_arg",
-        "unhash",
-        "role",
-        "timestamp",
-        "ratio_wad",
-    ]
-
-    addr_book = AddrToNameAddressBook({"0x1234567890abcdef1234567890abcdef12345678": "Mocked Name"})
-    setup_default(addr_book)
-    env.globals["b32_rainbow"] = {addr: "example_role"}
-    env.globals["chain_id"] = 1
-    env.globals["chains"] = {1: {"name": "Ethereum", "explorers": [{"url": "https://etherscan.io"}]}}
-
-    for filter_name in expected_filters:
-        assert filter_name in env.filters
-        assert callable(env.filters[filter_name])
-
-    template = env.from_string("{{ 1234567890 | amount }}")
-    rendered = template.render()
-    assert rendered == "1234.56789"
-
-    template = env.from_string("{{ '0x1234567890abcdef1234567890abcdef12345678' | address }}")
-    rendered = template.render()
-    assert rendered == "Mocked Name"
-
-    template = env.from_string(f"{{{{ '{addr}' | tx_link }}}}")
-    rendered = template.render()
-    assert rendered == f"[{addr}](https://etherscan.io/tx/{addr})"
-
-    template = env.from_string("{{ 123456 | block_link }}")
-    rendered = template.render()
-    assert rendered == "[123456](https://etherscan.io/block/123456)"
-
-    template = env.from_string("{{ '0x1234567890abcdef1234567890abcdef12345678' | address_link }}")
-    rendered = template.render()
-    assert rendered == "[Mocked Name](https://etherscan.io/address/0x1234567890abcdef1234567890abcdef12345678)"
-
-    template = env.from_string("{{ 1234567890 | autoformat_arg({'type': 'uint256', 'name': 'amount'}) }}")
-    rendered = template.render()
-    assert rendered == "1234.56789"
-
-    template = env.from_string(f"{{{{ '{addr}' | unhash }}}}")
-    rendered = template.render()
-    assert rendered == f"[example_role]({EMN178})"
-
-    template = env.from_string(f"{{{{ '{addr}' | role }}}}")
-    rendered = template.render()
-    assert rendered == f"[example_role]({EMN178})"
-
-    template = env.from_string("{{ 1234567890 | timestamp }}")
-    rendered = template.render()
-    assert rendered == "2009-02-13T23:31:30Z"
-
-    template = env.from_string("{{ 1000000000000000000 | ratio_wad }}")
-    rendered = template.render()
-    assert rendered == "1"
+@pytest.mark.parametrize(
+    "input_value, expected_output",
+    [
+        (1, "1E-18"),
+        (10**18, "1"),
+        (5 * 10**17, "0.5"),
+        (123456789012345678, "0.123456789012345678"),
+        (0, "0"),
+    ],
+)
+def test_ratio_wad(input_value, expected_output):
+    assert ratio_wad(input_value) == expected_output

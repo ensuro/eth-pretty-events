@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 from jinja2 import Environment, FileSystemLoader
 
-from eth_pretty_events.jinja2_ext import add_filters
+from eth_pretty_events.jinja2_ext import add_filters, add_tests
 from eth_pretty_events.render import init_environment, render
 
 from . import factories
@@ -42,6 +42,7 @@ def test_render_event():
     env = Environment(loader=FileSystemLoader(template_dir), autoescape=False)
     env.globals.update(env_globals)
     add_filters(env)
+    add_tests(env)
     transfer_event = factories.Event()
 
     result = render(env, transfer_event, template_name)
