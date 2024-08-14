@@ -187,8 +187,8 @@ def test_setup_address_book_inverted():
     "bytes32_rainbow_file, chains_file, expected_subset_b32, expected_subset_chains",
     [
         (
-            "samples/known-roles.json",
-            "samples/reduced-chains.json",
+            "./samples/known-roles.json",
+            "./samples/chains.json",
             {
                 "0x55435dd261a4b9b3364963f7738a7a662ad9c84396d64be3365284bb7f0a5041": "GUARDIAN_ROLE",
                 "0x499b8dbdbe4f7b12284c4a222a9951ce4488b43af4d09f42655d67f73b612fe1": "SWAP_ROLE",

@@ -69,7 +69,7 @@ def address_link(env, address: Address):
     return f"[{address_text}]({url}/address/{address})"
 
 
-def struct(value):  # is_struct
+def struct(value):
     return isinstance(value, ABITupleMixin)
 
 

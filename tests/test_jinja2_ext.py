@@ -28,7 +28,7 @@ def setup_environment():
     with open("./samples/known-roles.json") as f:
         known_roles = json.load(f)
 
-    with open("./samples/reduced-chains.json") as f:
+    with open("./samples/chains.json") as f:
         chains = json.load(f)
 
     env.globals["b32_rainbow"] = known_roles
