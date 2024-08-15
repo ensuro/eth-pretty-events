@@ -1,7 +1,7 @@
 ## {{evt.name}}
 Block: {{evt.tx.block.number | block_link }}
 TX: {{evt.tx.hash | tx_link }}
-Contract: {{evt.address | address}}
-From: {{evt.args.from_ | address }}
-To: {{evt.args.to | address }}
+Contract: {{evt.address | address_link}}
+From: {{evt.args.from_ | address_link }}
+To: {{evt.args.to | address_link }}
 Amount: {{evt.args.value | amount}}

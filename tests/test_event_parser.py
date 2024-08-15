@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 
+import pytest
 from hexbytes import HexBytes
 from web3.types import LogReceipt
 
@@ -192,3 +193,52 @@ def test_loads_when_multiple_abis_for_same_topic():
         assert [i["name"] for i in transfer_evt_def.abis[0]["inputs"]] == ["from", "to", "tokenId"]
         assert transfer_evt_def.args_types[1]._fields == ("from_", "to", "value")
         assert [i["name"] for i in transfer_evt_def.abis[1]["inputs"]] == ["from", "to", "value"]
+
+
+@pytest.mark.parametrize(
+    "log_entry, expected_result",
+    [
+        (
+            {
+                "transactionHash": "0x37a50ac80e26cbf0005469713177e3885800188d80b92134f150685e931aa4bf",
+                "address": "0x9aa7fEc87CA69695Dd1f879567CcF49F3ba417E2",
+                "blockHash": "0x81145f3e891ab54554d964f901f122635ba4b00e22066157c6cabb647f959506",
+                "blockNumber": 34530281,
+                "data": "0x00000000000000000000000000000000000000000000000000000002540be400",
+                "logIndex": 2,
+                "removed": False,
+                "topics": [],
+                "transactionIndex": 1,
+            },
+            None,
+        ),
+        (
+            {
+                "transactionHash": "0x37a50ac80e26cbf0005469713177e3885800188d80b92134f150685e931aa4bf",
+                "address": "0x9aa7fEc87CA69695Dd1f879567CcF49F3ba417E2",
+                "blockHash": "0x81145f3e891ab54554d964f901f122635ba4b00e22066157c6cabb647f959506",
+                "blockNumber": 34530281,
+                "data": "0x00000000000000000000000000000000000000000000000000000002540be400",
+                "logIndex": 2,
+                "removed": False,
+                "topics": [HexBytes("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")],
+                "transactionIndex": 1,
+            },
+            None,
+        ),
+    ],
+)
+def test_read_log_return_none(log_entry, expected_result):
+    chain = Chain(id=137, name="Polygon")
+    block = Block(
+        chain=chain,
+        number=34530281,
+        hash="0x81145f3e891ab54554d964f901f122635ba4b00e22066157c6cabb647f959506",
+        timestamp=1666168181,
+    )
+
+    EventDefinition._registry = {}
+
+    result = EventDefinition.read_log(log_entry, block)
+
+    assert result == expected_result

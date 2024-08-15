@@ -1,7 +1,11 @@
+import operator
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, Optional
+
+from eth_utils import keccak
 
 from eth_pretty_events.address_book import get_default as get_addr_book
 from eth_pretty_events.types import Address, Event
@@ -63,6 +67,33 @@ def _str_to_addr(value: str) -> Address:
             return address_value
 
 
+def transform_amount(val):
+    return int(Decimal(val) * Decimal(10**6))
+
+
+def transform_wad(val):
+    return int(Decimal(val) * Decimal(10**18))
+
+
+def transform_keccak(val: str) -> str:
+    return keccak(text=val).hex()
+
+
+def transform_address(val: str) -> Address:
+    address = get_addr_book().name_to_addr(val)
+    if address is None:
+        raise RuntimeError(f"Address for name {val} not found")
+    return address
+
+
+TRANSFORMS = {
+    "amount": transform_amount,
+    "wad": transform_wad,
+    "keccak": transform_keccak,
+    "address": transform_address,
+}
+
+
 @EventFilter.register("address")
 class AddressEventFilter(EventFilter):
     value: Address
@@ -74,15 +105,15 @@ class AddressEventFilter(EventFilter):
         return evt.address == self.value
 
 
-@EventFilter.register("in_address")
+@EventFilter.register("known_address")
 class InAddressBookEventFilter(EventFilter):
-    value: bool
+    is_known: bool
 
-    def __init__(self, value: bool):
-        self.value = value
+    def __init__(self, is_known: bool):
+        self.is_known = is_known
 
     def filter(self, evt: Event) -> bool:
-        return get_addr_book().has_addr(evt.address) == self.value
+        return get_addr_book().has_addr(evt.address) == self.is_known
 
 
 @EventFilter.register("name")
@@ -98,9 +129,19 @@ class NameEventFilter(EventFilter):
 
 @EventFilter.register("arg")
 class ArgEventFilter(EventFilter):
-    def __init__(self, arg_name: str, arg_value: Any):
+    OPERATORS = {
+        "eq": operator.eq,
+        "lt": operator.lt,
+        "gt": operator.gt,
+        "le": operator.le,
+        "ge": operator.ge,
+        "ne": operator.ne,
+    }
+
+    def __init__(self, arg_name: str, arg_value: Any = None, operator: str = "eq", transform: str = None):
         self.arg_name = arg_name
-        self.arg_value = arg_value
+        self.arg_value = TRANSFORMS[transform](arg_value) if transform is not None else arg_value
+        self.operator = self.OPERATORS[operator]
 
     def _get_arg(self, evt: Event):
         arg_path = self.arg_name.split(".")
@@ -110,7 +151,8 @@ class ArgEventFilter(EventFilter):
         return ret
 
     def filter(self, evt: Event) -> bool:
-        return self._get_arg(evt) == self.arg_value
+        arg_value = self._get_arg(evt)
+        return self.operator(arg_value, self.arg_value)
 
 
 @EventFilter.register("arg_exists")
@@ -135,13 +177,7 @@ class ArgExistsEventFilter(EventFilter):
         return self._get_arg(evt) is not None
 
 
-@EventFilter.register("address_arg")
-class AddressArgEventFilter(ArgEventFilter):
-    def __init__(self, arg_name: str, arg_value: Any):
-        return super().__init__(arg_name, _str_to_addr(arg_value))
-
-
-@EventFilter.register("in_address_arg")
+@EventFilter.register("known_address_arg")
 class InAddressBookArgEventFilter(ArgEventFilter):
     def filter(self, evt: Event) -> bool:
         return get_addr_book().has_addr(self._get_arg(evt)) == self.arg_value

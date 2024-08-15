@@ -1,9 +1,11 @@
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from jinja2 import Environment, pass_environment
+from web3.constants import ADDRESS_ZERO
 
 from .address_book import get_default as get_addr_book
-from .types import Address, Hash
+from .types import ABITupleMixin, Address, Hash
 
 MAX_UINT = 2**256 - 1
 
@@ -60,24 +62,46 @@ def block_link(env, value: int):
 
 @pass_environment
 def address_link(env, address: Address):
+    if address == ADDRESS_ZERO:
+        return "0x0"
     address_text = _address(address)
+    if address_text == ADDRESS_ZERO:
+        return f"[{address_text}]"
     url = _explorer_url(env)
     return f"[{address_text}]({url}/address/{address})"
 
 
+def is_struct(value):
+    return isinstance(value, ABITupleMixin)
+
+
 @pass_environment
-def autoformat_arg(env, arg_value, arb_abi):
-    if not arb_abi:
-        return arg_value  # Shouldn't happend but I just return without any formating
-    if arb_abi["type"] == "address":
+def autoformat_arg(env, arg_value, arg_abi):
+    if not arg_abi:
+        return arg_value
+
+    field_name = arg_abi.get("name", "")
+
+    if arg_abi["type"] == "address":
         return address_link(env, arg_value)
-    if arb_abi["type"] == "bytes32" and arb_abi["name"] == "role":
+    if arg_abi["type"] == "bytes32" and field_name == "role":
         return role(env, arg_value)
-    if arb_abi["type"] == "bytes32":
+    if arg_abi["type"] == "bytes32":
         return unhash(env, arg_value)
-    if arb_abi["type"] == "uint256" and arb_abi["name"] in ("value", "amount"):
+    if arg_abi["type"] in ("uint256") and field_name in ("amount"):
         return amount(arg_value)
+    if arg_abi["type"] in ("uint40"):
+        return timestamp(arg_value)
     return arg_value
+
+
+def ratio_wad(value):
+    return str(Decimal(value) / Decimal(10**18))
+
+
+def timestamp(value):
+    dt = datetime.fromtimestamp(int(value), tz=timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def amount(value, decimals="auto"):
@@ -94,5 +118,21 @@ def amount(value, decimals="auto"):
 
 
 def add_filters(env: Environment):
-    for fn in [amount, address, tx_link, block_link, address_link, autoformat_arg, unhash, role]:
+    for fn in [
+        amount,
+        address,
+        tx_link,
+        block_link,
+        address_link,
+        autoformat_arg,
+        unhash,
+        role,
+        timestamp,
+        ratio_wad,
+    ]:
         env.filters[fn.__name__] = fn
+
+
+def add_tests(env: Environment):
+    for test_name, fn in {"struct": is_struct}.items():
+        env.tests[test_name] = fn

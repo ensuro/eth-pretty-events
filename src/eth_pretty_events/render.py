@@ -17,6 +17,7 @@ def init_environment(
     )
     env.globals.update(env_globals)
     jinja2_ext.add_filters(env)
+    jinja2_ext.add_tests(env)
     return env
 
 

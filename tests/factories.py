@@ -54,6 +54,13 @@ class Tx(factory.Factory):
     index = factory.Sequence(lambda n: n)
 
 
+class Hash(factory.Factory):
+    class Meta:
+        model = types.Hash
+
+    value = factory.Faker("eth_hash")
+
+
 EVENT_NAMES = ["Transfer", "Approval", "NewPolicy"]
 
 TRANSFER_ABI = [
