@@ -14,8 +14,11 @@ from eth_pretty_events.address_book import setup_default as setup_addr_book
 from eth_pretty_events.cli import RenderingEnv
 from eth_pretty_events.event_filter import read_template_rules
 from eth_pretty_events.event_parser import EventDefinition
+from eth_pretty_events.flask_app import app
 
 from . import factories
+
+ALCHEMY_SAMPLE_SIGNATURE = "f8ac2edf5261684722c7e1af055be74d95583b52b53fc5f86590928a750a79aa"
 
 
 class TemplateLoader:
@@ -76,7 +79,6 @@ def w3_mock():
 @pytest.fixture
 def test_client(template_loader, template_rules, w3_mock):
     """Creates a test client and activates the app context for it"""
-    from eth_pretty_events.flask_app import app
 
     with app.test_client() as testing_client:
         with app.app_context():
@@ -90,6 +92,7 @@ def test_client(template_loader, template_rules, w3_mock):
                 args=None,
             )
             app.config["discord_url"] = "http://example.org/discord-webhook"
+            app.config["alchemy_keys"] = {"wh_6kmi7uom6hn97voi": "T0pS3cr3t"}
             yield testing_client
 
 
@@ -130,10 +133,15 @@ def test_render_tx_endpoint(test_client):
     ]
 
 
-def test_alchemy_webhook(test_client, discord_mock):
-    payload = json.load(open("samples/alchemy-sample.json"))
+def test_alchemy_webhook_happy(test_client, discord_mock):
+    with open("samples/alchemy-sample.json") as f:
+        payload = f.read()
 
-    response = test_client.post("/alchemy-webhook/", json=payload, headers={"x-alchemy-signature": "TODO"})
+    response = test_client.post(
+        "/alchemy-webhook/",
+        data=payload,
+        headers={"x-alchemy-signature": ALCHEMY_SAMPLE_SIGNATURE, "content-type": "application/json"},
+    )
     assert response.status_code == 200
     assert response.json == {"status": "ok", "ok_count": 1, "failed_count": 0}
 
@@ -144,4 +152,33 @@ def test_alchemy_webhook(test_client, discord_mock):
                 {"description": "Transfer 240.072021 from SOME_WHALE to 0xBA12222222228d8Ba445958a75a0704d566BF2C8"}
             ]
         },
+    )
+
+
+def test_alchemy_webhook_unknown_webhook_id(test_client, discord_mock):
+
+    response = test_client.post(
+        "/alchemy-webhook/",
+        json={"webhookId": "wh_madeupid"},
+        headers={"x-alchemy-signature": "DOES NOT MATTER"},
+    )
+    assert response.status_code == 200
+    assert response.json == {}
+
+
+def test_alchemy_webhook_invalid_signature(test_client, discord_mock):
+    with open("samples/alchemy-sample.json") as f:
+        payload = f.read()
+
+    response = test_client.post(
+        "/alchemy-webhook/",
+        data=payload,
+        headers={"x-alchemy-signature": "invalid", "content-type": "application/json"},
+    )
+    assert response.status_code == 403
+    assert response.json == {"error": "Forbidden"}
+
+    response = test_client.post(
+        "/alchemy-webhook/",
+        json={},
     )

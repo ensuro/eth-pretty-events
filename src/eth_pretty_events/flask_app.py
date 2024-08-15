@@ -1,3 +1,7 @@
+import hashlib
+import hmac
+from functools import wraps
+
 from flask import Flask, request
 
 from . import discord
@@ -9,9 +13,35 @@ from .types import Hash
 app = Flask("eth-pretty-events")
 
 
+def check_alchemy_signature(wrapped):
+    @wraps(wrapped)
+    def wrapper(*args, **kwargs):
+        webhook_id = request.json.get("webhookId")
+        if webhook_id is None:
+            return {"error": "Bad request"}, 400
+
+        signing_key = app.config["alchemy_keys"].get(webhook_id)
+        if signing_key is None:
+            app.logger.warning("Ignoring request %s for unknown webhook id %s", request.json.get("id"), webhook_id)
+            return {}
+
+        signature = request.headers.get("x-alchemy-signature", None)
+        if signature is None:
+            return {"error": "Unauthorized"}, 401
+
+        raw_body = request.get_data()
+        digest = hmac.new(bytes(signing_key, "utf-8"), msg=raw_body, digestmod=hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, digest):
+            return {"error": "Forbidden"}, 403
+
+        return wrapped(*args, **kwargs)
+
+    return wrapper
+
+
 @app.route("/alchemy-webhook/", methods=["POST"])
+@check_alchemy_signature
 def alchemy_webhook():
-    # TODO: validate signature
     discord_url = app.config["discord_url"]
     renv = app.config["renv"]
     payload = request.json
