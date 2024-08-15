@@ -229,7 +229,7 @@ def test_arg_exists_event_filter_with_nested_args():
     assert not arg_exists_filter.filter(event_with_different_nested_arg)
 
 
-def test_in_address_book_arg_event_filter():
+def test_known_address_book_arg_event_filter():
     in_addr_book_arg_filter = event_filter.EventFilter.from_config(
         dict(filter_type="known_address_arg", arg_name="user", arg_value=True)
     )

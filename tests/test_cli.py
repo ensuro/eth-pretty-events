@@ -6,27 +6,21 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from hexbytes import HexBytes
 from web3 import Web3
 from web3.exceptions import ExtraDataLengthError
 from web3.middleware.geth_poa import geth_poa_middleware
 
 from eth_pretty_events import address_book
 from eth_pretty_events.cli import (
-    _env_alchemy_keys
+    _env_alchemy_keys,
     _env_globals,
     _env_int,
     _env_list,
-    _events_from_alchemy_input,
-    _events_from_tx,
     _setup_address_book,
     _setup_web3,
     load_events,
     main,
 )
-from eth_pretty_events.types import Event
-
-from . import factories
 
 __author__ = "Guillermo M. Narvaja"
 __copyright__ = "Guillermo M. Narvaja"
@@ -215,59 +209,6 @@ def test_env_globals(bytes32_rainbow_file, chains_file, expected_subset_b32, exp
         assert actual_chain_data.get("name") == expected_chain_data["name"]
 
 
-def test_events_from_alchemy_input():
-    chain = factories.Chain(id=1, name="Ethereum")
-    events = list(_events_from_alchemy_input("samples/alchemy-sample.json", chain))
-    assert len(events) > 0
-
-
-def test_events_from_tx(mock_web3):
-
-    blockHash = HexBytes("0x81145f3e891ab54554d964f901f122635ba4b00e22066157c6cabb647f959506")
-    blockNumber = 34530281
-    transactionHash = HexBytes("0x37a50ac80e26cbf0005469713177e3885800188d80b92134f150685e931aa4bf")
-    transactionIndex = 1
-    logs = [
-        {
-            "address": "0x9aa7fEc87CA69695Dd1f879567CcF49F3ba417E2",
-            "topics": [
-                HexBytes("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"),
-                HexBytes("0x000000000000000000000000d758af6bfc2f0908d7c5f89942be52c36a6b3cab"),
-                HexBytes("0x0000000000000000000000008fca634a6edec7161def4478e94b930ea275a8a2"),
-            ],
-            "data": "0x00000000000000000000000000000000000000000000000000000002540be400",
-            "logIndex": 2,
-            "transactionIndex": 1,
-            "transactionHash": transactionHash,
-            "blockHash": blockHash,
-            "blockNumber": blockNumber,
-        }
-    ]
-
-    tx_response = _make_nt(
-        blockHash=blockHash,
-        blockNumber=blockNumber,
-        transactionHash=transactionHash,
-        transactionIndex=transactionIndex,
-        logs=logs,
-    )
-
-    mock_web3.eth.get_transaction_receipt.return_value = tx_response
-    mock_web3.eth.get_block.return_value.timestamp = 1625798789
-
-    chain = factories.Chain()
-
-    result = list(
-        _events_from_tx("0x37a50ac80e26cbf0005469713177e3885800188d80b92134f150685e931aa4bf", mock_web3, chain)
-    )
-
-    assert len(result) == len(tx_response.logs)
-    for event in result:
-        assert isinstance(event, Event)
-        assert event.tx.block.hash == tx_response.blockHash.hex()
-        assert event.tx.hash == tx_response.transactionHash.hex()
-
-
 def test_env_list_with_value():
     with patch.dict(os.environ, {"TEST_VAR": "value1 value2 value3"}):
         result = _env_list("TEST_VAR")
@@ -289,10 +230,9 @@ def test_env_int_with_value():
 
 
 def test_main_with_command(capsys):
-
     with patch("eth_pretty_events.cli.load_events") as mock_load_events, patch(
         "eth_pretty_events.cli.render_events"
-    ) as mock_render_events:
+    ) as mock_render_events, patch("eth_pretty_events.cli.setup_rendering_env") as mock_setup_rendering_env:
 
         mock_load_events.return_value = 25
         main(["load_events", str(os.path.dirname(__file__) / Path("abis"))])
@@ -302,6 +242,8 @@ def test_main_with_command(capsys):
 
         mock_load_events.reset_mock()
         mock_render_events.reset_mock()
+
+        mock_setup_rendering_env.return_value = _make_nt(abi_paths=[Path("abis")])
 
         main(["render_events", str(os.path.dirname(__file__) / Path("events"))])
         captured = capsys.readouterr()
@@ -313,6 +255,7 @@ def test_main_with_command(capsys):
 
         captured = capsys.readouterr()
         assert "Script ends here" not in captured.out
+
 
 def test_load_alchemy_keys():
     assert _env_alchemy_keys(
@@ -332,4 +275,3 @@ def test_load_alchemy_keys():
         _env_alchemy_keys({"ALCHEMY_WEBHOOK_MYKEY1_ID": "wh_6kmi7uom6hn97voi"})
 
     assert _env_alchemy_keys({"SOME_VARIABLE": "foobar"}) == {}
-

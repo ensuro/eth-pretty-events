@@ -65,6 +65,8 @@ def address_link(env, address: Address):
     if address == ADDRESS_ZERO:
         return "0x0"
     address_text = _address(address)
+    if address_text == ADDRESS_ZERO:
+        return f"[{address_text}]"
     url = _explorer_url(env)
     return f"[{address_text}]({url}/address/{address})"
 

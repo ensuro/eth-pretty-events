@@ -51,8 +51,8 @@ def template_rules():
                         {"filter_type": "arg_exists", "arg_name": "value"},
                         {
                             "or": [
-                                {"filter_type": "in_address_arg", "arg_name": "to", "arg_value": True},
-                                {"filter_type": "in_address_arg", "arg_name": "from", "arg_value": True},
+                                {"filter_type": "known_address_arg", "arg_name": "to", "arg_value": True},
+                                {"filter_type": "known_address_arg", "arg_name": "from", "arg_value": True},
                             ]
                         },
                     ],
