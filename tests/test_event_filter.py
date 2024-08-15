@@ -44,17 +44,17 @@ def test_str_to_addr_not_in_book():
         event_filter._str_to_addr(name)
 
 
-def test_in_address_book_filter_true():
-    in_address_filter = event_filter.EventFilter.from_config(dict(filter_type="in_address", value=True))
+def test_known_address_book_filter_true():
+    known_address_filter = event_filter.EventFilter.from_config(dict(filter_type="known_address", is_known=True))
     event = factories.Event(address=ADDRESSES["USDC"])
 
-    assert in_address_filter.filter(event)
+    assert known_address_filter.filter(event)
 
 
-def test_in_address_book_filter_false():
-    in_address_filter = event_filter.EventFilter.from_config(dict(filter_type="in_address", value=False))
+def test_known_address_book_filter_false():
+    known_address_filter = event_filter.EventFilter.from_config(dict(filter_type="known_address", is_known=False))
     event = factories.Event(address=Address(ADDRESS_ZERO))
-    assert in_address_filter.filter(event)
+    assert known_address_filter.filter(event)
 
 
 def test_arg_exists_event_filter():
@@ -231,7 +231,7 @@ def test_arg_exists_event_filter_with_nested_args():
 
 def test_in_address_book_arg_event_filter():
     in_addr_book_arg_filter = event_filter.EventFilter.from_config(
-        dict(filter_type="in_address_arg", arg_name="user", arg_value=True)
+        dict(filter_type="known_address_arg", arg_name="user", arg_value=True)
     )
 
     assert isinstance(in_addr_book_arg_filter, event_filter.InAddressBookArgEventFilter)

@@ -6,7 +6,7 @@
 **Arguments**
 {% for arg_name in evt.args._abi_fields() %}
 **Arg:** {{ arg_name }}
-{% if evt.args[arg_name] is struct %}
+{% if evt.args[arg_name] is is_struct %}
   {% for sub_arg_name in evt.args[arg_name]._abi_fields() %}
   - {{ sub_arg_name }}: {{ evt.args[arg_name][sub_arg_name] | autoformat_arg(evt.args[arg_name]._field_abi(sub_arg_name)) }}
   {% endfor %}

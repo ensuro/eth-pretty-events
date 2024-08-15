@@ -69,7 +69,7 @@ def address_link(env, address: Address):
     return f"[{address_text}]({url}/address/{address})"
 
 
-def struct(value):
+def is_struct(value):
     return isinstance(value, ABITupleMixin)
 
 
@@ -127,11 +127,10 @@ def add_filters(env: Environment):
         role,
         timestamp,
         ratio_wad,
-        struct,
     ]:
         env.filters[fn.__name__] = fn
 
 
 def add_tests(env: Environment):
-    for fn in [struct]:
+    for fn in [is_struct]:
         env.tests[fn.__name__] = fn

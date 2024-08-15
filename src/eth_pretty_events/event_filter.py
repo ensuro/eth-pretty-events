@@ -105,15 +105,15 @@ class AddressEventFilter(EventFilter):
         return evt.address == self.value
 
 
-@EventFilter.register("in_address")
+@EventFilter.register("known_address")
 class InAddressBookEventFilter(EventFilter):
-    value: bool
+    is_known: bool
 
-    def __init__(self, value: bool):
-        self.value = value
+    def __init__(self, is_known: bool):
+        self.is_known = is_known
 
     def filter(self, evt: Event) -> bool:
-        return get_addr_book().has_addr(evt.address) == self.value
+        return get_addr_book().has_addr(evt.address) == self.is_known
 
 
 @EventFilter.register("name")
@@ -179,7 +179,7 @@ class ArgExistsEventFilter(EventFilter):
         return self._get_arg(evt) is not None
 
 
-@EventFilter.register("in_address_arg")
+@EventFilter.register("known_address_arg")
 class InAddressBookArgEventFilter(ArgEventFilter):
 
     def filter(self, evt: Event) -> bool:

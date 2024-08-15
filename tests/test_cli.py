@@ -1,7 +1,6 @@
 import argparse
 import json
 import os
-import sys
 from collections import namedtuple
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -23,7 +22,6 @@ from eth_pretty_events.cli import (
     _setup_web3,
     load_events,
     main,
-    run,
 )
 from eth_pretty_events.types import Event
 
@@ -325,30 +323,3 @@ def test_main_with_command(capsys):
 
         captured = capsys.readouterr()
         assert "Script ends here" not in captured.out
-
-
-def test_run_with_load_events():
-    test_args = ["run.py", "load_events", "path/to/abis"]
-
-    with patch.object(sys, "argv", test_args):
-        with patch("eth_pretty_events.cli.main") as mock_main:
-            run()
-            mock_main.assert_called_once_with(["load_events", "path/to/abis"])
-
-
-def test_run_with_render_events():
-    test_args = ["run.py", "render_events", "path/to/events"]
-
-    with patch.object(sys, "argv", test_args):
-        with patch("eth_pretty_events.cli.main") as mock_main:
-            run()
-            mock_main.assert_called_once_with(["render_events", "path/to/events"])
-
-
-def test_run_with_no_arguments():
-    test_args = ["run.py"]
-
-    with patch.object(sys, "argv", test_args):
-        with patch("eth_pretty_events.cli.main") as mock_main:
-            run()
-            mock_main.assert_called_once_with([])

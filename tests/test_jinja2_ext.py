@@ -11,9 +11,9 @@ from eth_pretty_events.jinja2_ext import (
     address_link,
     autoformat_arg,
     block_link,
+    is_struct,
     ratio_wad,
     role,
-    struct,
     tx_link,
 )
 from eth_pretty_events.types import Hash
@@ -156,7 +156,7 @@ def test_explorer_url_chain_not_found():
     ],
 )
 def test_is_struct(input_value, expected_output):
-    result = struct(input_value)
+    result = is_struct(input_value)
     assert result == expected_output
 
 
