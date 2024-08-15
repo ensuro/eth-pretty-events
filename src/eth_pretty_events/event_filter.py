@@ -141,7 +141,7 @@ class ArgEventFilter(EventFilter):
     def __init__(self, arg_name: str, arg_value: Any = None, operator: str = "eq", transform: str = None):
         self.arg_name = arg_name
         self.arg_value = TRANSFORMS[transform](arg_value) if transform is not None else arg_value
-        self.operator = operator
+        self.operator = self.OPERATORS[operator]
 
     def _get_arg(self, evt: Event):
         arg_path = self.arg_name.split(".")
@@ -152,9 +152,7 @@ class ArgEventFilter(EventFilter):
 
     def filter(self, evt: Event) -> bool:
         arg_value = self._get_arg(evt)
-        compare_func = self.OPERATORS[self.operator]
-        result = compare_func(arg_value, self.arg_value)
-        return result
+        return self.operator(arg_value, self.arg_value)
 
 
 @EventFilter.register("arg_exists")

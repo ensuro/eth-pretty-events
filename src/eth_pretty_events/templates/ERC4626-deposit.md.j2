@@ -1,0 +1,8 @@
+## {{ evt.name }}
+Block: {{ evt.tx.block.number | block_link }}
+TX: {{ evt.tx.hash | tx_link }}
+Contract: {{ evt.address | address_link }}
+From: {{ evt.args.sender | address_link }}
+To: {{ evt.args.receiver | address_link }}
+Shares: {{ evt.args.shares | amount }}
+Assets: {{ evt.args.assets | amount }}

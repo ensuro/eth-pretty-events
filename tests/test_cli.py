@@ -32,12 +32,18 @@ __copyright__ = "Guillermo M. Narvaja"
 __license__ = "MIT"
 
 
+def _make_nt(**kwargs):
+    nt_name = kwargs.pop("_name", "Unnamed")
+    nt_type = namedtuple(nt_name, kwargs.keys())
+    return nt_type(**kwargs)
+
+
 @pytest.fixture
 def mock_web3():
     with patch("eth_pretty_events.cli.Web3") as mock_web3:
         mock_instance = MagicMock()
         mock_web3.return_value = mock_instance
-        yield mock_web3, mock_instance
+        yield mock_instance
 
 
 @pytest.fixture
@@ -53,8 +59,7 @@ def test_load_events():
 
 @pytest.fixture
 def setup_address_book():
-    args = MagicMock()
-    args.address_book = "samples/address-book.json"
+    args = _make_nt(address_book="samples/address-book.json")
 
     _setup_address_book(args, None)
 
@@ -74,38 +79,33 @@ def test_main(capsys):
 
 
 def test_setup_web3_no_rpc_url():
-    Params = namedtuple("Params", "rpc_url")
-    args = Params(None)
+    args = _make_nt(rpc_url=None)
     w3 = _setup_web3(args)
     assert w3 is None
 
 
 def test_setup_web3_with_valid_rpc_url(mock_web3, mock_http_provider):
-    args = MagicMock(rpc_url="https://example.com")
-
+    args = _make_nt(rpc_url="https://example.com")
     mock_http_provider.return_value = Web3.HTTPProvider(args.rpc_url)
-    mock_web3_instance = mock_web3[1]
-    mock_web3_instance.is_connected.return_value = True
+    mock_web3.is_connected.return_value = True
 
     result = _setup_web3(args)
 
-    assert result == mock_web3_instance
+    assert result == mock_web3
     mock_http_provider.assert_called_once_with(args.rpc_url)
-    mock_web3[0].assert_called_once_with(mock_http_provider.return_value)
-    mock_web3_instance.is_connected.assert_called_once()
+    mock_web3.is_connected.assert_called_once()
 
 
 def test_setup_web3_with_extra_data_length_error(mock_web3, mock_http_provider):
-    args = MagicMock(rpc_url="https://example.com")
+    args = _make_nt(rpc_url="https://example.com")
 
-    mock_web3_instance = mock_web3[1]
-    mock_web3_instance.eth.get_block.side_effect = ExtraDataLengthError
-    mock_web3_instance.is_connected.return_value = True
+    mock_web3.eth.get_block.side_effect = ExtraDataLengthError
+    mock_web3.is_connected.return_value = True
 
     result = _setup_web3(args)
-    mock_web3_instance.middleware_onion.inject.assert_called_once_with(geth_poa_middleware, layer=0)
+    mock_web3.middleware_onion.inject.assert_called_once_with(geth_poa_middleware, layer=0)
 
-    assert result == mock_web3_instance
+    assert result == mock_web3
 
 
 @pytest.mark.parametrize(
@@ -129,16 +129,9 @@ def test_setup_web3_with_extra_data_length_error(mock_web3, mock_http_provider):
     ],
 )
 def test_env_globals_chain_id(args_chain_id, w3_chain_id, expected_chain_id, should_raise_error, error_message):
-    args = MagicMock()
-    args.bytes32_rainbow = None
-    args.chain_id = args_chain_id
-    args.chains_file = None
+    args = _make_nt(bytes32_rainbow=None, chain_id=args_chain_id, chains_file=None)
 
-    if w3_chain_id is not None:
-        w3 = MagicMock()
-        w3.eth.chain_id = w3_chain_id
-    else:
-        w3 = None
+    w3 = _make_nt(eth=_make_nt(chain_id=w3_chain_id)) if w3_chain_id is not None else None
 
     if should_raise_error:
         with pytest.raises(argparse.ArgumentTypeError, match=error_message):
@@ -168,9 +161,7 @@ def test_setup_address_book_inverted():
     with open("samples/inverted-address-book.json", "w") as f:
         json.dump(inverted_address_data, f)
 
-    args = MagicMock()
-    args.address_book = "samples/inverted-address-book.json"
-
+    args = _make_nt(address_book="samples/inverted-address-book.json")
     _setup_address_book(args, None)
 
     inverted_book = address_book.get_default()
@@ -202,19 +193,11 @@ def test_setup_address_book_inverted():
     ],
 )
 def test_env_globals(bytes32_rainbow_file, chains_file, expected_subset_b32, expected_subset_chains):
-    args = MagicMock()
-
-    if bytes32_rainbow_file:
-        args.bytes32_rainbow = Path(bytes32_rainbow_file)
-    else:
-        args.bytes32_rainbow = None
-
-    if chains_file:
-        args.chains_file = Path(chains_file)
-    else:
-        args.chains_file = None
-
-    args.chain_id = "1"
+    args = _make_nt(
+        bytes32_rainbow=Path(bytes32_rainbow_file) if bytes32_rainbow_file else None,
+        chains_file=Path(chains_file) if chains_file else None,
+        chain_id="1",
+    )
 
     ret = _env_globals(args, None)
 
@@ -238,14 +221,12 @@ def test_events_from_alchemy_input():
 
 
 def test_events_from_tx(mock_web3):
-    mock_web3, mock_instance = mock_web3
 
-    mock_receipt = MagicMock()
-    mock_receipt.blockHash = HexBytes("0x81145f3e891ab54554d964f901f122635ba4b00e22066157c6cabb647f959506")
-    mock_receipt.blockNumber = 34530281
-    mock_receipt.transactionHash = HexBytes("0x37a50ac80e26cbf0005469713177e3885800188d80b92134f150685e931aa4bf")
-    mock_receipt.transactionIndex = 1
-    mock_receipt.logs = [
+    blockHash = HexBytes("0x81145f3e891ab54554d964f901f122635ba4b00e22066157c6cabb647f959506")
+    blockNumber = 34530281
+    transactionHash = HexBytes("0x37a50ac80e26cbf0005469713177e3885800188d80b92134f150685e931aa4bf")
+    transactionIndex = 1
+    logs = [
         {
             "address": "0x9aa7fEc87CA69695Dd1f879567CcF49F3ba417E2",
             "topics": [
@@ -256,26 +237,34 @@ def test_events_from_tx(mock_web3):
             "data": "0x00000000000000000000000000000000000000000000000000000002540be400",
             "logIndex": 2,
             "transactionIndex": 1,
-            "transactionHash": mock_receipt.transactionHash,
-            "blockHash": mock_receipt.blockHash,
-            "blockNumber": mock_receipt.blockNumber,
+            "transactionHash": transactionHash,
+            "blockHash": blockHash,
+            "blockNumber": blockNumber,
         }
     ]
 
-    mock_instance.eth.get_transaction_receipt.return_value = mock_receipt
-    mock_instance.eth.get_block.return_value.timestamp = 1625798789
+    tx_response = _make_nt(
+        blockHash=blockHash,
+        blockNumber=blockNumber,
+        transactionHash=transactionHash,
+        transactionIndex=transactionIndex,
+        logs=logs,
+    )
+
+    mock_web3.eth.get_transaction_receipt.return_value = tx_response
+    mock_web3.eth.get_block.return_value.timestamp = 1625798789
 
     chain = factories.Chain()
 
     result = list(
-        _events_from_tx("0x37a50ac80e26cbf0005469713177e3885800188d80b92134f150685e931aa4bf", mock_instance, chain)
+        _events_from_tx("0x37a50ac80e26cbf0005469713177e3885800188d80b92134f150685e931aa4bf", mock_web3, chain)
     )
 
-    assert len(result) == len(mock_receipt.logs)
+    assert len(result) == len(tx_response.logs)
     for event in result:
         assert isinstance(event, Event)
-        assert event.tx.block.hash == mock_receipt.blockHash.hex()
-        assert event.tx.hash == mock_receipt.transactionHash.hex()
+        assert event.tx.block.hash == tx_response.blockHash.hex()
+        assert event.tx.hash == tx_response.transactionHash.hex()
 
 
 def test_env_list_with_value():

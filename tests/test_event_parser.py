@@ -103,17 +103,6 @@ new_policy_dict_log = {
     "transactionHash": "0x14b6eff233705f97b2e3d29e754a55697b03bea1ad61686e186d1b9b815ac136",
 }
 
-NON_MATCHING_ABI = """{
-    "anonymous": false,
-    "inputs": [
-        {"indexed": true, "internalType": "uint256", "name": "tokenId", "type": "uint256"},
-        {"indexed": true, "internalType": "address", "name": "owner", "type": "address"},
-        {"indexed": false, "internalType": "string", "name": "uri", "type": "string"}
-    ],
-    "name": "NonMatchingEvent",
-    "type": "event"
-}"""
-
 
 def test_transfer_event():
     global transfer_log
