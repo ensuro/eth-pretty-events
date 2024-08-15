@@ -179,7 +179,6 @@ class ArgExistsEventFilter(EventFilter):
 
 @EventFilter.register("known_address_arg")
 class InAddressBookArgEventFilter(ArgEventFilter):
-
     def filter(self, evt: Event) -> bool:
         return get_addr_book().has_addr(self._get_arg(evt)) == self.arg_value
 
