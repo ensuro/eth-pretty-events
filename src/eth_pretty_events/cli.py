@@ -184,6 +184,18 @@ def _env_int(env_var) -> Optional[int]:
     return None
 
 
+def _env_alchemy_keys(env) -> dict:
+    keys = {}
+    for var, value in env.items():
+        if var.startswith("ALCHEMY_WEBHOOK_") and var.endswith("_ID"):
+            try:
+                key = env[f"{var[:-len('_ID')]}_KEY"]
+            except KeyError:
+                raise ValueError(f"Missing key for {var}")
+            keys[value] = key
+    return keys
+
+
 def parse_args(args):
     """Parse command line parameters
 
@@ -313,6 +325,7 @@ def main(args):
         # TODO: rollbar setup?
         flask_app.app.config["renv"] = renv
         flask_app.app.config["discord_url"] = args.discord_url
+        flask_app.app.config["alchemy_keys"] = _env_alchemy_keys(os.environ)
         if args.command == "flask_dev":
             flask_app.app.run(port=args.port)
         else:
