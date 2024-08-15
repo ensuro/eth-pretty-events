@@ -132,5 +132,5 @@ def add_filters(env: Environment):
 
 
 def add_tests(env: Environment):
-    for fn in [is_struct]:
-        env.tests[fn.__name__] = fn
+    for test_name, fn in {"struct": is_struct}.items():
+        env.tests[test_name] = fn
