@@ -42,7 +42,7 @@ def build_and_send_messages(discord_url: str, renv, events: Iterable[Event]):
         if message is None:
             continue
 
-        response = post(discord_url, json=message)
+        response = post(discord_url, message)
         responses.append(response)
 
     return responses

@@ -2,6 +2,7 @@ import json
 import os
 from dataclasses import dataclass
 from typing import ClassVar, Dict, Optional, Sequence, Type
+from warnings import warn
 
 from eth_utils.abi import event_abi_to_log_topic
 from eth_utils.address import to_checksum_address
@@ -106,7 +107,13 @@ class EventDefinition:
 
     @classmethod
     def load_events(cls, contract_abi):
-        return [cls.from_abi(evt) for evt in filter(lambda item: item["type"] == "event", contract_abi)]
+        ret = []
+        for evt in filter(lambda item: item["type"] == "event", contract_abi):
+            try:
+                ret.append(cls.from_abi(evt))
+            except Exception as e:
+                warn(f"Failed to load event {evt['name']}: {e}")
+        return ret
 
     @classmethod
     def load_all_events(cls, lookup_paths):
@@ -116,5 +123,11 @@ class EventDefinition:
                 for filename in filter(lambda f: f.endswith(".json"), files):
                     with open(os.path.join(sub_path, filename)) as f:
                         contract_abi = json.load(f)
-                    ret.extend(cls.load_events(contract_abi["abi"]))
+                    if "abi" not in contract_abi:
+                        # Not all json files will be contract ABIs
+                        continue
+                    try:
+                        ret.extend(cls.load_events(contract_abi["abi"]))
+                    except Exception as e:
+                        warn(f"Failed to load events from {filename}: {e}")
         return ret
