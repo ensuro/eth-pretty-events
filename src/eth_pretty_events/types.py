@@ -125,7 +125,9 @@ def arg_from_solidity_type(type_: str) -> Type:
     raise RuntimeError(f"Unsupported type {type_}")
 
 
-def rename_keyword(field_name):
+def sanitize_field_name(field_name):
+    if field_name.startswith("_"):
+        return sanitize_field_name(field_name.lstrip("_"))
     if field_name in keyword.kwlist:
         return f"{field_name}_"
     else:
@@ -159,7 +161,7 @@ class NamedTupleDictMixin:
             if key in nt_asdict:
                 return nt_asdict[key]
             else:
-                return nt_asdict[rename_keyword(key)]
+                return nt_asdict[sanitize_field_name(key)]
         return super().__getitem__(key)
 
 
@@ -169,7 +171,7 @@ class ABITupleMixin(NamedTupleDictMixin):
     def from_args(cls: Type[ArgsTuple], args) -> ArgsTuple:
         field_values = []
         for i, (field, component) in enumerate(zip(cls._fields, cls._components)):
-            assert rename_keyword(component["name"]) == field
+            assert sanitize_field_name(component["name"]) == field
             if isinstance(args, (tuple, list)):
                 value = args[i]
             else:
@@ -192,7 +194,7 @@ class ABITupleMixin(NamedTupleDictMixin):
 
 def make_abi_namedtuple(name, components) -> Type[ArgsTuple]:
     attributes = [comp["name"] for comp in components]
-    attributes = map(rename_keyword, attributes)
+    attributes = map(sanitize_field_name, attributes)
 
     nt = namedtuple(name, attributes)
     ret = types.new_class(name, bases=(ABITupleMixin, nt))

@@ -16,6 +16,19 @@ USDC_ADDR = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
 OTHER_ADDR = "0x3898a4ff6B65D1F8fA89372CfE250d03BE0b2D84"
 SOME_HASH = "0x37a50ac80e26cbf0005469713177e3885800188d80b92134f150685e931aa4bf"
 
+TRANSFER_WITH_UNDERSCORE = [
+    {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": True, "internalType": "address", "name": "_from", "type": "address"},
+            {"indexed": True, "internalType": "address", "name": "_to", "type": "address"},
+            {"indexed": False, "internalType": "uint256", "name": "_value", "type": "uint256"},
+        ],
+        "name": "Transfer",
+        "type": "event",
+    },
+]
+
 
 def _get_event(abi, event_name):
     return next(evt for evt in abi if evt["type"] == "event" and evt["name"] == event_name)
@@ -118,6 +131,22 @@ def test_make_abi_namedtuple():
         }
     )
     assert new_policy_nt.policy.jrCoc == 10
+
+
+def test_make_abi_namedtuple_with_underscore():
+    transfer = _get_event(TRANSFER_WITH_UNDERSCORE, "Transfer")
+    transfer_nt_type = types.make_abi_namedtuple("Transfer", transfer["inputs"])
+    assert transfer_nt_type._fields == ("from_", "to", "value")
+    transfer_nt = transfer_nt_type.from_args({"_from": USDC_ADDR, "_to": OTHER_ADDR, "_value": 1000000})
+    assert len(transfer_nt) == 3
+    assert isinstance(transfer_nt, tuple)
+    assert transfer_nt["_from"] == USDC_ADDR
+    assert transfer_nt["from_"] == USDC_ADDR
+    assert transfer_nt.from_ == USDC_ADDR
+    assert transfer_nt[0] == USDC_ADDR
+    assert transfer_nt.to == OTHER_ADDR
+    assert isinstance(transfer_nt.to, types.Address)
+    assert transfer_nt.value == 1000000
 
 
 def test_event_from_evt_data():
