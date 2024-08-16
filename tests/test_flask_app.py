@@ -147,7 +147,7 @@ def test_alchemy_webhook_happy(test_client, discord_mock):
 
     discord_mock.assert_called_once_with(
         "http://example.org/discord-webhook",
-        json={
+        {
             "embeds": [
                 {"description": "Transfer 240.072021 from SOME_WHALE to 0xBA12222222228d8Ba445958a75a0704d566BF2C8"}
             ]
