@@ -62,10 +62,15 @@ def test_args_registry():
     assert types.arg_from_solidity_type("uint123") is int
     assert types.arg_from_solidity_type("bytes32") is types.Hash
     assert types.arg_from_solidity_type("address") is types.Address
-
-    # bytes not supported yet
-    with pytest.raises(RuntimeError, match="Unsupported type bytes"):
-        types.arg_from_solidity_type("bytes")
+    bytes_ = b"\x12\x34\x56"
+    assert types.arg_from_solidity_type("bytes")(bytes_) == bytes_.hex()
+    address_array = ["0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174", "0x625E7708f30cA75bfd92586e17077590C60eb4cD"]
+    assert types.arg_from_solidity_type("address[]")(address_array) == address_array
+    int_array = [1, 2, 3, 4, 5]
+    assert types.arg_from_solidity_type("uint256[]")(int_array) == int_array
+    print(types.arg_from_solidity_type("bytes"))
+    with pytest.raises(RuntimeError, match="Unsupported type unknown_type"):
+        types.arg_from_solidity_type("unknown_type")
 
 
 def test_make_abi_namedtuple():
