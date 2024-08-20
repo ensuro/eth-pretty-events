@@ -88,7 +88,11 @@ class EventDefinition:
         if topic not in cls._registry:
             return None
         event = cls._registry[topic]
-        return event.get_event_data(log_entry, block, tx)
+        try:
+            return event.get_event_data(log_entry, block, tx)
+        except RuntimeError as e:
+            warn(f"Failed to decode log for topic {topic}: {e}")
+            return None
 
     @classmethod
     def abi_codec(cls):

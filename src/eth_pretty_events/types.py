@@ -108,15 +108,21 @@ class Event:
 
 INT_TYPE_REGEX = re.compile(r"int\d+|uint\d+")
 BYTES_TYPE_REGEX = re.compile(r"bytes\d+")
+ARRAY_TYPE_REGEX = re.compile(r"(.+)\[\]$")
 
 
 def arg_from_solidity_type(type_: str) -> Type:
     if type_ == "bool":
         return bool
+    if ARRAY_TYPE_REGEX.match(type_):
+        base_type = ARRAY_TYPE_REGEX.match(type_).group(1)
+        return lambda x: [arg_from_solidity_type(base_type)(item) for item in x]
     if INT_TYPE_REGEX.match(type_):
         return int
     if type_ == "bytes32":
         return Hash
+    if type_ == "bytes":
+        return lambda x: x.hex()
     if BYTES_TYPE_REGEX.match(type_):
         # TODO: handle bytes4 or other special cases
         return lambda x: x.hex()
