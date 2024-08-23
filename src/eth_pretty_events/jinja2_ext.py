@@ -149,6 +149,9 @@ def add_filters(env: Environment):
         role,
         timestamp,
         ratio_wad,
+        tx_explorer_link,
+        block_explorer_link,
+        address_explorer_link,
     ]:
         env.filters[fn.__name__] = fn
 
