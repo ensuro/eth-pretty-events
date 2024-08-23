@@ -49,15 +49,35 @@ def _explorer_url(env):
 
 
 @pass_environment
-def tx_link(env, value: Hash):
+def tx_explorer_link(env, value: Hash):
     url = _explorer_url(env)
-    return f"[{value}]({url}/tx/{value})"
+    return f"{url}/tx/{value}"
+
+
+pass_environment
+
+
+def block_explorer_link(env, value: int):
+    url = _explorer_url(env)
+    return f"{url}/block/{value}"
+
+
+@pass_environment
+def address_explorer_link(env, address: Address):
+    url = _explorer_url(env)
+    return f"{url}/address/{address}"
+
+
+@pass_environment
+def tx_link(env, value: Hash):
+    link = tx_explorer_link(env, value)
+    return f"[{value}]({link})"
 
 
 @pass_environment
 def block_link(env, value: int):
-    url = _explorer_url(env)
-    return f"[{value}]({url}/block/{value})"
+    link = block_explorer_link(env, value)
+    return f"[{value}]({link})"
 
 
 @pass_environment
@@ -67,8 +87,8 @@ def address_link(env, address: Address):
     address_text = _address(address)
     if address_text == ADDRESS_ZERO:
         return f"[{address_text}]"
-    url = _explorer_url(env)
-    return f"[{address_text}]({url}/address/{address})"
+    link = address_explorer_link(env, address)
+    return f"[{address_text}]({link})"
 
 
 def is_struct(value):
