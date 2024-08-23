@@ -54,9 +54,7 @@ def tx_explorer_link(env, value: Hash):
     return f"{url}/tx/{value}"
 
 
-pass_environment
-
-
+@pass_environment
 def block_explorer_link(env, value: int):
     url = _explorer_url(env)
     return f"{url}/block/{value}"
