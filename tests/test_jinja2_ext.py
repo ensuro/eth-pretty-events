@@ -8,12 +8,15 @@ from eth_pretty_events.address_book import AddrToNameAddressBook, setup_default
 from eth_pretty_events.jinja2_ext import (
     _explorer_url,
     address,
+    address_explorer_link,
     address_link,
     autoformat_arg,
+    block_explorer_link,
     block_link,
     is_struct,
     ratio_wad,
     role,
+    tx_explorer_link,
     tx_link,
 )
 from eth_pretty_events.types import Hash
@@ -108,6 +111,28 @@ def test_address_link(setup_environment, address, expected_output):
 
     result = address_link(env, address)
     assert result == expected_output
+
+
+@pytest.mark.parametrize(
+    "link_function, value, expected_result",
+    [
+        (
+            tx_explorer_link,
+            "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+            "https://etherscan.io/tx/0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+        ),
+        (block_explorer_link, 12345, "https://etherscan.io/block/12345"),
+        (
+            address_explorer_link,
+            "0x1234567890abcdef1234567890abcdef12345678",
+            "https://etherscan.io/address/0x1234567890abcdef1234567890abcdef12345678",
+        ),
+    ],
+)
+def test_explorer_links(setup_environment, link_function, value, expected_result):
+    env = setup_environment
+    result = link_function(env, value)
+    assert result == expected_result
 
 
 @pytest.mark.parametrize(
