@@ -1,4 +1,5 @@
 import argparse
+import itertools
 import json
 import logging
 import os
@@ -150,7 +151,15 @@ def render_events(renv: RenderingEnv, input: str):
         if renv.w3 is None:
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
         # It's a block number
-        events = decode_events.decode_from_block(int(input), renv.w3, renv.chain)
+        events = decode_events.decode_events_from_block(int(input), renv.w3, renv.chain)
+    elif input.replace("-", "").isdigit():
+        if renv.w3 is None:
+            raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
+        block_from, block_to = input.split("-")
+        blocks = range(int(block_from), int(block_to) + 1)
+        events = itertools.chain.from_iterable(
+            decode_events.decode_events_from_block(block, renv.w3, renv.chain) for block in blocks
+        )
     else:
         raise argparse.ArgumentTypeError(f"Unknown input '{input}'")
 

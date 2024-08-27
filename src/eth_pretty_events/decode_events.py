@@ -34,7 +34,7 @@ def decode_events_from_tx(tx_hash: str, w3: Web3, chain: Chain) -> Iterable[Opti
     return (EventDefinition.read_log(log, block=block, tx=tx) for log in receipt.logs)
 
 
-def _events_from_block(block_number: int, w3: Web3, chain: Chain) -> Iterable[Optional[Event]]:
+def decode_events_from_block(block_number: int, w3: Web3, chain: Chain) -> Iterable[Optional[Event]]:
     w3_block = w3.eth.get_block(block_number)
     block = Block(chain=chain, number=block_number, timestamp=w3_block["timestamp"], hash=Hash(w3_block["hash"]))
     for w3_tx in w3_block.transactions:
