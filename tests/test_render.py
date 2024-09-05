@@ -51,4 +51,4 @@ def test_render_event():
     assert "Block:" in result
     assert "Contract:" in result
     assert "Arguments" in result
-    assert "Value:" in result
+    assert "value:" in result
