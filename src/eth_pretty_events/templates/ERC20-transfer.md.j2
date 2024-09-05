@@ -1,7 +1,10 @@
-## {{evt.name}}
-Block: {{evt.tx.block.number | block_link }}
-TX: {{evt.tx.hash | tx_link }}
-Contract: {{evt.address | address_link}}
-From: {{evt.args.from_ | address_link }}
-To: {{evt.args.to | address_link }}
-Amount: {{evt.args.value | amount}}
+{% if evt.args.from_ == "0x0000000000000000000000000000000000000000" %}
+# [Token Mint]({{ evt.tx.hash | tx_explorer_link }})
+Minted {{ evt.args.value | amount }} {{ evt.address | address_link }} | to {{ evt.args.to | address_link }}
+{% elif evt.args.to == "0x0000000000000000000000000000000000000000" %}
+# [Token Burn]({{ evt.tx.hash | tx_explorer_link }})
+Burned {{ evt.args.value | amount }} {{ evt.address | address_link }} | from {{ evt.args.from_ | address_link }}
+{% else %}
+# [Token Transfer]({{ evt.tx.hash | tx_explorer_link }})
+Transfered {{ evt.args.value | amount }} {{ evt.address | address_link }} | from {{ evt.args.from_ | address_link }} → {{ evt.args.to | address_link }}
+{% endif %}

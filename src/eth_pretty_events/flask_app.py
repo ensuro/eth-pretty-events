@@ -46,6 +46,11 @@ def alchemy_webhook():
     renv = app.config["renv"]
     payload = request.json
 
+    block_number = payload.get("event", {}).get("blockNumber")
+    transactions = payload.get("event", {}).get("transactions", [])
+    num_logs = sum(len(tx.get("logs", [])) for tx in transactions)
+
+    app.logger.info(f"Processing block {block_number} with {len(transactions)} transactions and {num_logs} logs.")
     responses = discord.build_and_send_messages(discord_url, renv, decode_from_alchemy_input(payload, renv.chain))
 
     ok_messages = sum(1 for response in responses if response.status_code == 200)

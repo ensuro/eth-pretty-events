@@ -1,8 +1,8 @@
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import ClassVar, Dict, Optional, Sequence, Type
-from warnings import warn
 
 from eth_utils.abi import event_abi_to_log_topic
 from eth_utils.address import to_checksum_address
@@ -14,6 +14,8 @@ from web3.exceptions import LogTopicError
 from web3.types import LogReceipt
 
 from .types import ArgsTuple, Block, Event, Tx, make_abi_namedtuple
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -70,12 +72,21 @@ class EventDefinition:
             "transactionIndex": int(log["transactionIndex"], 16),
         }
 
+    def __str__(self, log_entry: LogReceipt):
+        return f"Log {log_entry['transactionHash'].hex()}-{log_entry['logIndex']}"
+
     def get_event_data(self, log_entry: LogReceipt, block: Block, tx: Optional[Tx] = None) -> Optional[Event]:
         for i, abi in enumerate(self.abis):
             try:
                 ret = get_event_data(self.abi_codec(), abi, log_entry)
             except LogTopicError:
                 if i == len(self.abis) - 1:
+                    logger.warning(
+                        "Failed to decode event in log entry: %s, Block: %s, Contract: %s",
+                        log_entry,
+                        block.number,
+                        log_entry["address"],
+                    )
                     raise
             else:
                 return Event.from_event_data(ret, self.args_types[i], tx=tx, block=block)
@@ -91,7 +102,7 @@ class EventDefinition:
         try:
             return event.get_event_data(log_entry, block, tx)
         except RuntimeError as e:
-            warn(f"Failed to decode log for topic {topic}: {e}")
+            logger.warning("Failed to decode log for topic %s in log entry: %s, Error: %s", topic, log_entry, e)
             return None
 
     @classmethod
@@ -116,7 +127,7 @@ class EventDefinition:
             try:
                 ret.append(cls.from_abi(evt))
             except Exception as e:
-                warn(f"Failed to load event {evt['name']}: {e}")
+                logger.warning("Failed to load event %s: %s", evt["name"], e)
         return ret
 
     @classmethod
@@ -133,5 +144,5 @@ class EventDefinition:
                     try:
                         ret.extend(cls.load_events(contract_abi["abi"]))
                     except Exception as e:
-                        warn(f"Failed to load events from {filename}: {e}")
+                        logger.warning("Failed to load events from %s: %s", filename, e)
         return ret
