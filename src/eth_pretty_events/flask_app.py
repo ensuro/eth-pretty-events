@@ -1,5 +1,7 @@
 import hashlib
 import hmac
+import json
+import os
 from functools import wraps
 
 from flask import Flask, request
@@ -46,11 +48,21 @@ def alchemy_webhook():
     renv = app.config["renv"]
     payload = request.json
 
+    webhook_id = payload.get("webhookId")
     block_number = payload.get("event", {}).get("blockNumber")
     transactions = payload.get("event", {}).get("transactions", [])
     num_logs = sum(len(tx.get("logs", [])) for tx in transactions)
 
-    app.logger.info(f"Processing block {block_number} with {len(transactions)} transactions and {num_logs} logs.")
+    app.logger.info(
+        "Processing webhook_id: %s, block: %s, transactions: %s, logs: %s",
+        webhook_id,
+        block_number,
+        len(transactions),
+        num_logs,
+    )
+    if os.environ.get("ALCHEMY_VERBOSE_MODE", "False").lower() in ("true", "1"):
+        app.logger.info("Alchemy webhook: %s", json.dumps(request.json))
+
     responses = discord.build_and_send_messages(discord_url, renv, decode_from_alchemy_input(payload, renv.chain))
 
     ok_messages = sum(1 for response in responses if response.status_code == 200)
