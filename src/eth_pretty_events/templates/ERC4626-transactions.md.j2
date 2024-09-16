@@ -1,0 +1,17 @@
+## {{ evt.name }}
+**Block:** {{ evt.tx.block.number | block_link }}
+**TX:** {{ evt.tx.hash | tx_link }}
+**Contract:** {{ evt.address | address_link }}
+{% if evt.name == 'Deposit' or evt.name == 'Withdraw' -%}
+**From:** {{ evt.args.sender | address_link }}
+{% if evt.name == 'Withdraw' -%}
+**Receiver:** {{ evt.args.receiver | address_link }}
+{% endif -%}
+**Owner:** {{ evt.args.owner | address_link }}
+**Assets:** {{ evt.args.assets | amount }}
+**Shares:** {{ evt.args.shares | amount }}
+{% elif evt.name == 'Transfer' -%}
+**From:** {{ evt.args.from | address_link }}
+**To:** {{ evt.args.to | address_link }}
+**Value:** {{ evt.args.value | amount }}
+{% endif %}
