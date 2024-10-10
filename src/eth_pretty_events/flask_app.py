@@ -69,6 +69,27 @@ def alchemy_webhook():
     failed_messages = len(responses) - ok_messages
     status_description = "ok" if failed_messages == 0 else "error"
 
+    if failed_messages > 0:
+        failed_details = [
+            {"status_code": response.status_code, "content": response.content.decode()}
+            for response in responses
+            if response.status_code != 200
+        ]
+        app.logger.error(
+            "Result: %s, ok_count: %s, failed_count: %s, failed_details: %s",
+            status_description,
+            ok_messages,
+            failed_messages,
+            json.dumps(failed_details),
+        )
+    elif failed_messages == 0:
+        app.logger.info(
+            "Result: %s, ok_count: %s, failed_count: %s",
+            status_description,
+            ok_messages,
+            failed_messages,
+        )
+
     # TODO: do we want to fail if any of the messages fails? Probably not as it will cause a flood of repeated messages
     return {"status": status_description, "ok_count": ok_messages, "failed_count": failed_messages}
 

@@ -133,7 +133,8 @@ def test_render_tx_endpoint(test_client):
     ]
 
 
-def test_alchemy_webhook_happy(test_client, discord_mock):
+def test_alchemy_webhook_happy(test_client, discord_mock, caplog):
+    caplog.set_level("INFO")
     with open("samples/alchemy-sample.json") as f:
         payload = f.read()
 
@@ -153,6 +154,10 @@ def test_alchemy_webhook_happy(test_client, discord_mock):
             ]
         },
     )
+
+    assert "INFO" in [record.levelname for record in caplog.records]
+    assert any("Result: ok" in record.message for record in caplog.records)
+    assert any("ok_count: 1, failed_count: 0" in record.message for record in caplog.records)
 
 
 def test_alchemy_webhook_unknown_webhook_id(test_client, discord_mock):
@@ -182,3 +187,29 @@ def test_alchemy_webhook_invalid_signature(test_client, discord_mock):
         "/alchemy-webhook/",
         json={},
     )
+
+
+def test_alchemy_webhook_with_failed_messages(test_client, discord_mock, caplog):
+    caplog.set_level("ERROR")
+
+    discord_mock.return_value = MagicMock(status_code=404, content=b"Webhook not found")
+
+    with open("samples/alchemy-sample.json") as f:
+        payload = f.read()
+
+    response = test_client.post(
+        "/alchemy-webhook/",
+        data=payload,
+        headers={"x-alchemy-signature": ALCHEMY_SAMPLE_SIGNATURE, "content-type": "application/json"},
+    )
+    assert response.status_code == 200
+    assert response.json == {"status": "error", "ok_count": 0, "failed_count": 1}
+
+    assert any(record.levelname == "ERROR" for record in caplog.records)
+    assert any("Result: error" in record.message for record in caplog.records)
+    assert any("ok_count: 0, failed_count: 1" in record.message for record in caplog.records)
+
+    failed_log = next((record for record in caplog.records if record.levelname == "ERROR"), None)
+    assert failed_log is not None
+    assert "failed_details" in failed_log.message
+    assert "Webhook not found" in failed_log.message
