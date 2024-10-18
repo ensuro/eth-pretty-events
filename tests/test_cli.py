@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from web3 import Web3
 from web3.exceptions import ExtraDataLengthError
-from web3.middleware.geth_poa import geth_poa_middleware
+from web3.middleware import ExtraDataToPOAMiddleware
 
 from eth_pretty_events import address_book
 from eth_pretty_events.cli import (
@@ -98,7 +98,7 @@ def test_setup_web3_with_extra_data_length_error(mock_web3, mock_http_provider):
     mock_web3.is_connected.return_value = True
 
     result = _setup_web3(args)
-    mock_web3.middleware_onion.inject.assert_called_once_with(geth_poa_middleware, layer=0)
+    mock_web3.middleware_onion.inject.assert_called_once_with(ExtraDataToPOAMiddleware, layer=0)
 
     assert result == mock_web3
 
