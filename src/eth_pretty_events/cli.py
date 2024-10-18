@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 import itertools
 import json
 import logging
@@ -8,10 +9,13 @@ from dataclasses import dataclass
 from typing import Any, Optional, Sequence
 
 import jinja2
+import websockets
 import yaml
-from web3 import Web3
+from web3 import AsyncWeb3, Web3
+from web3._utils.encoding import Web3JsonEncoder
 from web3.exceptions import ExtraDataLengthError
 from web3.middleware import ExtraDataToPOAMiddleware
+from web3.providers.persistent import WebSocketProvider
 
 from eth_pretty_events import __version__, address_book, decode_events, render
 from eth_pretty_events.event_filter import (
@@ -65,6 +69,14 @@ def _setup_web3(args) -> Optional[Web3]:
     return w3
 
 
+async def _setup_web3_async(w3) -> Optional[Web3]:
+    assert await w3.is_connected()
+    try:
+        await w3.eth.get_block("latest")
+    except ExtraDataLengthError:
+        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+
+
 def _setup_address_book(args, _: Optional[Web3]):
     if args.address_book:
         addr_data = json.load(open(args.address_book))
@@ -77,7 +89,7 @@ def _setup_address_book(args, _: Optional[Web3]):
         address_book.setup_default(class_(addr_data))
 
 
-def _env_globals(args, w3):
+def _env_globals(args, w3_chain_id):
     ret = {}
     if args.bytes32_rainbow:
         ret["b32_rainbow"] = json.load(open(args.bytes32_rainbow))
@@ -87,12 +99,12 @@ def _env_globals(args, w3):
 
     if args.chain_id:
         chain_id = ret["chain_id"] = int(args.chain_id)
-        if w3 and chain_id != w3.eth.chain_id:
+        if w3_chain_id is not None and chain_id != w3_chain_id:
             raise argparse.ArgumentTypeError(
-                f"--chain-id={chain_id} differs with the id of the RPC connection {w3.eth.chain_id}"
+                f"--chain-id={chain_id} differs with the id of the RPC connection {w3_chain_id}"
             )
-    elif w3:
-        chain_id = ret["chain_id"] = w3.eth.chain_id
+    elif w3_chain_id:
+        chain_id = ret["chain_id"] = w3_chain_id
     else:
         raise argparse.ArgumentTypeError("Either --chain-id or --rpc-url must be specified")
 
@@ -116,7 +128,7 @@ def setup_rendering_env(args) -> RenderingEnv:
     """Sets up the rendering environment"""
     EventDefinition.load_all_events(args.abi_paths)
     w3 = _setup_web3(args)
-    env_globals = _env_globals(args, w3)
+    env_globals = _env_globals(args, w3.eth.chain_id if w3 is not None else None)
     chain = env_globals["chain"]
 
     _setup_address_book(args, w3)
@@ -131,6 +143,87 @@ def setup_rendering_env(args) -> RenderingEnv:
         chain=chain,
         args=args,
     )
+
+
+async def setup_rendering_env_async(args, w3) -> RenderingEnv:
+    """Sets up the rendering environment"""
+    EventDefinition.load_all_events(args.abi_paths)
+    await _setup_web3_async(w3)
+    eth_chain_id = await w3.eth.chain_id
+    env_globals = _env_globals(args, eth_chain_id)
+    chain = env_globals["chain"]
+
+    _setup_address_book(args, w3)
+
+    jinja_env = render.init_environment(args.template_paths, env_globals)
+
+    template_rules = read_template_rules(yaml.load(open(args.template_rules), yaml.SafeLoader))
+    return RenderingEnv(
+        w3=w3,
+        jinja_env=jinja_env,
+        template_rules=template_rules,
+        chain=chain,
+        args=args,
+    )
+
+
+async def _do_listen_events(w3, renv):
+    USDC = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+    latest_block = await w3.eth.get_block("latest")
+    safe_block = await w3.eth.get_block("finalized")
+    print(f"Latest block: {latest_block.number}, Safe block: {safe_block.number}")
+    transfer_event_topic = w3.keccak(text="Transfer(address,address,uint256)")
+    subscription_id = await w3.eth.subscribe(
+        "logs",
+        {
+            "address": USDC,
+            # Transfer from any address to 0x4c56A8EFdd7aFd6A708641e3754801fE0538eb80
+            "topics": [
+                [transfer_event_topic],
+                [],
+                # ["0x0000000000000000000000004c56a8efdd7afd6a708641e3754801fe0538eb80"],
+                [],
+            ],
+        },
+    )
+    print(f"Subscription: {subscription_id}")
+
+    block_headers_sub_id = await w3.eth.subscribe("newHeads")
+    print(f"Block Headers Subscription: {block_headers_sub_id}")
+
+    async for payload in w3.socket.process_subscriptions():
+        print(json.dumps(payload, cls=Web3JsonEncoder, indent=2))
+        # handle responses here
+
+        # if some_condition:
+        #     # unsubscribe from new block headers and break out of
+        #     # iterator
+        #     await w3.eth.unsubscribe(subscription_id)
+        #     break
+
+    assert w3.is_connected()
+
+
+async def listen_events(args):
+    if args.rpc_url is None:
+        raise argparse.ArgumentTypeError("Missing --rpc-url argument")
+    if args.rpc_url.startswith("https://"):
+        ws_url = args.rpc_url.replace("https://", "wss://")
+    else:
+        ws_url = args.rpc_url
+
+    first_loop = True
+    renv = None
+
+    async for w3 in AsyncWeb3(WebSocketProvider(ws_url)):
+        try:
+            if first_loop:
+                renv = await setup_rendering_env_async(args, w3)
+                first_loop = False
+            await _do_listen_events(w3, renv)
+        except websockets.ConnectionClosed:
+            _logger.warn("WebSocket connection closed - Reconnecting")
+            continue
 
 
 def render_events(renv: RenderingEnv, input: str):
@@ -306,6 +399,15 @@ def parse_args(args):
     flask_gunicorn.add_argument(
         "--rollbar-env", type=str, help="Name of the rollbar environment", default=os.environ.get("ROLLBAR_ENVIRONMENT")
     )
+
+    listen_events = subparsers.add_parser("listen_events")
+    listen_events.add_argument(
+        "--n-confirmations",
+        type=int,
+        help="Number of confirmations required to consider a block finalized",
+        default=_env_int("N_CONFIRMATIONS"),
+    )
+
     return parser.parse_args(args)
 
 
@@ -327,6 +429,8 @@ def main(args):
     elif args.command == "render_events":
         renv = setup_rendering_env(args)
         render_events(renv, args.input)
+    elif args.command == "listen_events":
+        asyncio.run(listen_events(args))
     elif args.command in ("flask_dev", "flask_gunicorn"):
         from . import flask_app
 

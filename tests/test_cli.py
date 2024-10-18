@@ -126,13 +126,11 @@ def test_setup_web3_with_extra_data_length_error(mock_web3, mock_http_provider):
 def test_env_globals_chain_id(args_chain_id, w3_chain_id, expected_chain_id, should_raise_error, error_message):
     args = _make_nt(bytes32_rainbow=None, chain_id=args_chain_id, chains_file=None)
 
-    w3 = _make_nt(eth=_make_nt(chain_id=w3_chain_id)) if w3_chain_id is not None else None
-
     if should_raise_error:
         with pytest.raises(argparse.ArgumentTypeError, match=error_message):
-            _env_globals(args, w3)
+            _env_globals(args, w3_chain_id)
     else:
-        result = _env_globals(args, w3)
+        result = _env_globals(args, w3_chain_id)
         assert result["chain_id"] == expected_chain_id
         assert result["chain"].id == expected_chain_id
         assert result["chain"].name == f"chain-{expected_chain_id}"
