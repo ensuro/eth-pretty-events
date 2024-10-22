@@ -11,7 +11,7 @@ import jinja2
 import yaml
 from web3 import Web3
 from web3.exceptions import ExtraDataLengthError
-from web3.middleware.geth_poa import geth_poa_middleware
+from web3.middleware import ExtraDataToPOAMiddleware
 
 from eth_pretty_events import __version__, address_book, decode_events, render
 from eth_pretty_events.event_filter import (
@@ -61,7 +61,7 @@ def _setup_web3(args) -> Optional[Web3]:
     try:
         w3.eth.get_block("latest")
     except ExtraDataLengthError:
-        w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
     return w3
 
 

@@ -76,7 +76,7 @@ def transform_wad(val):
 
 
 def transform_keccak(val: str) -> str:
-    return keccak(text=val).hex()
+    return "0x" + keccak(text=val).hex()
 
 
 def transform_address(val: str) -> Address:

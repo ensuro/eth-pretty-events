@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 def event_str(event: LogReceipt):
-    return f"Event {event.transactionHash.hex()}-{event.logIndex}"
+    return f"Event 0x{event.transactionHash.hex()}-{event.logIndex}"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -91,7 +91,7 @@ class EventDefinition:
     def read_log(cls, log_entry: LogReceipt, block: Block, tx: Optional[Tx] = None) -> Optional[Event]:
         if not log_entry["topics"]:
             return None  # Not an event
-        topic = log_entry["topics"][0].hex()
+        topic = log_entry["topics"][0].to_0x_hex()
         if topic not in cls._registry:
             return None
         event = cls._registry[topic]

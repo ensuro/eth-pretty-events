@@ -25,8 +25,8 @@ class Address(str):
     def __new__(cls, value: Union[HexBytes, str]):
         if isinstance(value, HexBytes):
             value = value.hex()
-            if len(value) != 42:
-                raise ValueError(f"'{value}' is not a valid address")
+            if len(value) != 40:
+                raise ValueError(f"'0x{value}' is not a valid address")
             value = to_checksum_address(value)
         elif isinstance(value, str) and value == value.lower():
             value = to_checksum_address(value)
@@ -38,19 +38,24 @@ class Address(str):
 
 class Hash(str):
     def __new__(cls, value: Union[HexBytes, str, bytes]):
-        if isinstance(value, HexBytes):
-            value = value.hex()
-            if len(value) != 66:
-                raise ValueError(f"'{value}' is not a valid hash")
-        elif isinstance(value, bytes):
+        if isinstance(value, HexBytes) or isinstance(value, bytes):
             value = "0x" + value.hex()
             if len(value) != 66:
                 raise ValueError(f"'{value}' is not a valid hash")
         elif isinstance(value, str):
-            if len(value) != 66:
+            if len(value) == 64 and not value.startswith("0x"):
+                value = "0x" + value
+            elif len(value) != 66:
                 raise ValueError(f"'{value}' is not a valid hash")
             if value != value.lower():
                 value = value.lower()
+            if value[0:2] != "0x":
+                raise ValueError(f"'{value}' is not a valid hash")
+            else:
+                try:
+                    int(value, 16)
+                except ValueError:
+                    raise ValueError(f"'{value}' is not a valid hash")
         else:
             raise ValueError("Only HexBytes, bytes or str accepted")
 
@@ -93,7 +98,7 @@ class Event:
             assert tx.hash == Hash(evt["transactionHash"])
         else:
             tx = Tx(
-                hash=Hash(evt["transactionHash"].hex()),
+                hash=Hash(evt["transactionHash"]),
                 index=evt["transactionIndex"],
                 block=block,
             )

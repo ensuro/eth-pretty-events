@@ -170,9 +170,9 @@ def test_transform_wad():
 
 
 def test_transform_keccak():
-    assert event_filter.transform_keccak("example") == keccak(text="example").hex()
-    assert event_filter.transform_keccak("") == keccak(text="").hex()
-    assert event_filter.transform_keccak("another_string") == keccak(text="another_string").hex()
+    assert event_filter.transform_keccak("example") == "0x" + keccak(text="example").hex()
+    assert event_filter.transform_keccak("") == "0x" + keccak(text="").hex()
+    assert event_filter.transform_keccak("another_string") == "0x" + keccak(text="another_string").hex()
 
 
 def test_transform_address():
