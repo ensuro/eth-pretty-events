@@ -18,13 +18,15 @@ from web3.middleware import ExtraDataToPOAMiddleware
 from web3.providers.persistent import WebSocketProvider
 
 from eth_pretty_events import __version__, address_book, decode_events, render
+from eth_pretty_events.block_tree import BlockTree
 from eth_pretty_events.event_filter import (
     TemplateRule,
     find_template,
     read_template_rules,
 )
 from eth_pretty_events.event_parser import EventDefinition
-from eth_pretty_events.types import Address, Chain
+from eth_pretty_events.event_subscriptions import load_subscriptions
+from eth_pretty_events.types import Address, Chain, Hash
 
 __author__ = "Guillermo M. Narvaja"
 __copyright__ = "Guillermo M. Narvaja"
@@ -167,39 +169,42 @@ async def setup_rendering_env_async(args, w3) -> RenderingEnv:
     )
 
 
-async def _do_listen_events(w3, renv):
-    USDC = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
-    latest_block = await w3.eth.get_block("latest")
-    safe_block = await w3.eth.get_block("finalized")
-    print(f"Latest block: {latest_block.number}, Safe block: {safe_block.number}")
-    transfer_event_topic = w3.keccak(text="Transfer(address,address,uint256)")
-    subscription_id = await w3.eth.subscribe(
-        "logs",
-        {
-            "address": USDC,
-            # Transfer from any address to 0x4c56A8EFdd7aFd6A708641e3754801fE0538eb80
-            "topics": [
-                [transfer_event_topic],
-                [],
-                # ["0x0000000000000000000000004c56a8efdd7afd6a708641e3754801fe0538eb80"],
-                [],
-            ],
-        },
-    )
-    print(f"Subscription: {subscription_id}")
-
+async def _do_listen_events(w3: AsyncWeb3, block_tree: BlockTree, renv: RenderingEnv, subscriptions: list):
     block_headers_sub_id = await w3.eth.subscribe("newHeads")
-    print(f"Block Headers Subscription: {block_headers_sub_id}")
+    _logger.info(f"Block Headers Subscription: {block_headers_sub_id}")
+    last_fork_number = None
+
+    blocks_seen = 0
+
+    log_subscriptions = {}
+    for name, addresses, topics in subscriptions:
+        log_subscriptions[name] = await w3.eth.subscribe(
+            "logs",
+            {
+                "address": addresses,
+                # Transfer from any address to 0x4c56A8EFdd7aFd6A708641e3754801fE0538eb80
+                "topics": topics,
+            },
+        )
+        _logger.info(f"Subscription for {name}: {log_subscriptions[name]}")
 
     async for payload in w3.socket.process_subscriptions():
-        print(json.dumps(payload, cls=Web3JsonEncoder, indent=2))
-        # handle responses here
-
-        # if some_condition:
-        #     # unsubscribe from new block headers and break out of
-        #     # iterator
-        #     await w3.eth.unsubscribe(subscription_id)
-        #     break
+        if payload["subscription"] == block_headers_sub_id:
+            blocks_seen += 1
+            block = payload["result"]
+            hash = Hash(block["hash"])
+            parent_hash = Hash(block["parentHash"])
+            number = block["number"]
+            fork_number = block_tree.add_block(number, parent_hash, hash)
+            if fork_number != last_fork_number:
+                _logger.info(f"New fork found {number}: {parent_hash} => {hash}")
+                last_fork_number = fork_number
+            block_tree.dump()
+            if blocks_seen % renv.args.block_tree_cleanup == 0:
+                block_tree.clean(renv.args.block_tree_cleanup)
+        else:
+            # TODO: handle log messages
+            print(json.dumps(payload, cls=Web3JsonEncoder, indent=2))
 
     assert w3.is_connected()
 
@@ -214,13 +219,22 @@ async def listen_events(args):
 
     first_loop = True
     renv = None
+    block_tree = BlockTree()
+    if not args.subscriptions:
+        raise argparse.ArgumentTypeError("Missing --subscriptions argument")
+    subscriptions_file = yaml.load(open(args.subscriptions), yaml.SafeLoader)
 
     async for w3 in AsyncWeb3(WebSocketProvider(ws_url)):
         try:
             if first_loop:
                 renv = await setup_rendering_env_async(args, w3)
+                ab = address_book.get_default()
+                subscriptions = load_subscriptions(
+                    subscriptions_file.get("subscriptions", subscriptions_file.get("hooks", {})), ab
+                )
+                subscriptions = list(subscriptions)
                 first_loop = False
-            await _do_listen_events(w3, renv)
+            await _do_listen_events(w3, block_tree, renv, subscriptions)
         except websockets.ConnectionClosed:
             _logger.warn("WebSocket connection closed - Reconnecting")
             continue
@@ -279,11 +293,11 @@ def _env_list(env_var) -> Optional[Sequence[str]]:
     return None
 
 
-def _env_int(env_var) -> Optional[int]:
+def _env_int(env_var, default=None) -> Optional[int]:
     value = os.environ.get(env_var)
     if value is not None:
         return int(value)
-    return None
+    return default
 
 
 def _env_alchemy_keys(env) -> dict:
@@ -405,7 +419,21 @@ def parse_args(args):
         "--n-confirmations",
         type=int,
         help="Number of confirmations required to consider a block finalized",
-        default=_env_int("N_CONFIRMATIONS"),
+        default=_env_int("N_CONFIRMATIONS", 32),
+    )
+
+    listen_events.add_argument(
+        "--block-tree-cleanup",
+        type=int,
+        help="Number of blocks to store in the block tree",
+        default=_env_int("BLOCK_TREE_CLEANUP", 64),
+    )
+
+    listen_events.add_argument(
+        "--subscriptions",
+        type=str,
+        help="Yaml file with the address and topics to subscribe to",
+        default=os.environ.get("SUBSCRIPTIONS"),
     )
 
     return parser.parse_args(args)
