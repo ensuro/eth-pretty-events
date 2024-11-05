@@ -4,14 +4,17 @@ import itertools
 import json
 import logging
 import os
+import pprint
 import sys
+from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Optional, Sequence
+from typing import Any, Awaitable, List, Optional, Sequence, Tuple
 
 import jinja2
 import websockets
 import yaml
 from web3 import AsyncWeb3, Web3
+from web3 import types as web3types
 from web3._utils.encoding import Web3JsonEncoder
 from web3.exceptions import ExtraDataLengthError
 from web3.middleware import ExtraDataToPOAMiddleware
@@ -26,7 +29,7 @@ from eth_pretty_events.event_filter import (
 )
 from eth_pretty_events.event_parser import EventDefinition
 from eth_pretty_events.event_subscriptions import load_subscriptions
-from eth_pretty_events.types import Address, Chain, Hash
+from eth_pretty_events.types import Address, Block, Chain, Event, Hash, Tx
 
 __author__ = "Guillermo M. Narvaja"
 __copyright__ = "Guillermo M. Narvaja"
@@ -59,6 +62,13 @@ class RenderingEnv:
     args: Any
 
 
+@dataclass
+class DecodedTxLogs:
+    tx: Tx
+    raw_logs: List[web3types.LogReceipt]
+    decoded_logs: List[Optional[Event]]
+
+
 def _setup_web3(args) -> Optional[Web3]:
     if args.rpc_url is None:
         return None
@@ -69,14 +79,6 @@ def _setup_web3(args) -> Optional[Web3]:
     except ExtraDataLengthError:
         w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
     return w3
-
-
-async def _setup_web3_async(w3) -> Optional[Web3]:
-    assert await w3.is_connected()
-    try:
-        await w3.eth.get_block("latest")
-    except ExtraDataLengthError:
-        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 
 
 def _setup_address_book(args, _: Optional[Web3]):
@@ -147,29 +149,13 @@ def setup_rendering_env(args) -> RenderingEnv:
     )
 
 
-async def setup_rendering_env_async(args, w3) -> RenderingEnv:
-    """Sets up the rendering environment"""
-    EventDefinition.load_all_events(args.abi_paths)
-    await _setup_web3_async(w3)
-    eth_chain_id = await w3.eth.chain_id
-    env_globals = _env_globals(args, eth_chain_id)
-    chain = env_globals["chain"]
-
-    _setup_address_book(args, w3)
-
-    jinja_env = render.init_environment(args.template_paths, env_globals)
-
-    template_rules = read_template_rules(yaml.load(open(args.template_rules), yaml.SafeLoader))
-    return RenderingEnv(
-        w3=w3,
-        jinja_env=jinja_env,
-        template_rules=template_rules,
-        chain=chain,
-        args=args,
-    )
-
-
-async def _do_listen_events(w3: AsyncWeb3, block_tree: BlockTree, renv: RenderingEnv, subscriptions: list):
+async def _do_listen_events(
+    w3: AsyncWeb3,
+    block_tree: BlockTree,
+    renv: RenderingEnv,
+    subscriptions: list,
+    raw_logs: asyncio.Queue[Tuple[Block, List[web3types.LogReceipt]]],
+):
     block_headers_sub_id = await w3.eth.subscribe("newHeads")
     _logger.info(f"Block Headers Subscription: {block_headers_sub_id}")
     last_fork_number = None
@@ -188,25 +174,94 @@ async def _do_listen_events(w3: AsyncWeb3, block_tree: BlockTree, renv: Renderin
         )
         _logger.info(f"Subscription for {name}: {log_subscriptions[name]}")
 
+    waitlist_logs: dict[Block, List] = defaultdict(list)
+    timestamp_cache: dict[Hash, int] = {}  # TODO: add some cleanup
+
     async for payload in w3.socket.process_subscriptions():
         if payload["subscription"] == block_headers_sub_id:
+            print(json.dumps(payload, cls=Web3JsonEncoder, indent=2))
             blocks_seen += 1
-            block = payload["result"]
-            hash = Hash(block["hash"])
-            parent_hash = Hash(block["parentHash"])
-            number = block["number"]
-            fork_number = block_tree.add_block(number, parent_hash, hash)
+
+            # Adds the block to the tree
+            raw_block = payload["result"]
+            block = Block(Hash(raw_block["hash"]), raw_block["timestamp"], raw_block["number"], renv.chain)
+            timestamp_cache[block.hash] = block.timestamp
+            parent_hash = Hash(raw_block["parentHash"])
+            fork_number = block_tree.add_block(block.number, parent_hash, block.hash)
             if fork_number != last_fork_number:
-                _logger.info(f"New fork found {number}: {parent_hash} => {hash}")
+                _logger.info(f"New fork found {block.number}: {parent_hash} => {block.hash}")
                 last_fork_number = fork_number
             block_tree.dump()
+
+            # Block tree cleanup, needed to release memory and to drop forked logs
             if blocks_seen % renv.args.block_tree_cleanup == 0:
                 block_tree.clean(renv.args.block_tree_cleanup)
+
+            # Pushes to the queue the logs that have enough confirmations
+            for block in sorted(waitlist_logs.keys(), key=lambda x: x.number):
+                confirmations = block_tree.confirmations(block.number, block.hash)
+                if confirmations >= 0 and confirmations < renv.args.n_confirmations:
+                    continue  # TODO: check if break would be better
+                payloads = waitlist_logs.pop(block)
+                if confirmations == -1:
+                    # Drop logs, they were part of a deleted fork
+                    _logger.info("Droping logs in non confirmed fork {block_number}: {block_hash}")
+                    for pl in payloads:
+                        print(json.dumps(pl, cls=Web3JsonEncoder, indent=2))
+                else:  # confirmations >= renv.args.n_confirmations:
+                    await raw_logs.put((block, [pl["result"] for pl in payloads]))
         else:
-            # TODO: handle log messages
-            print(json.dumps(payload, cls=Web3JsonEncoder, indent=2))
+            raw_log: web3types.LogReceipt = payload["result"]
+            block_hash = Hash(raw_log["blockHash"])
+            timestamp = timestamp_cache[block_hash]  # Assumes the block was received previously
+            block = Block(block_hash, timestamp, raw_log["blockNumber"], renv.chain)
+            waitlist_logs[block].append(payload)
 
     assert w3.is_connected()
+
+
+async def parse_raw_events(
+    renv: RenderingEnv, raw_logs: asyncio.Queue, processed_logs: List[asyncio.Queue[DecodedTxLogs]]
+):
+    """Processes the raw logs, enrichs them (decoding) and groups by TX"""
+    while True:
+        block: Block
+        logs: List[web3types.LogReceipt]
+        block, logs = await raw_logs.get()
+
+        for tx_hash, tx_logs in itertools.groupby(logs, key=lambda x: x["transactionHash"]):
+            tx_logs = list(tx_logs)
+            tx = Tx(Hash(tx_hash), tx_logs[0]["transactionIndex"], block)
+            decoded_events = list(decode_events.decode_events_from_raw_logs(block, tx, tx_logs))
+            decoded_log = DecodedTxLogs(tx, tx_logs, decoded_events)
+            for queue in processed_logs:
+                await queue.put(decoded_log)
+
+
+async def _websocket_loop(ws_url, do_stuff_fn):
+    async for w3 in AsyncWeb3(WebSocketProvider(ws_url)):
+        try:
+            try:
+                await w3.eth.get_block("latest")
+            except ExtraDataLengthError:
+                w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+            await do_stuff_fn(w3)
+        except websockets.ConnectionClosed:
+            _logger.warn("WebSocket connection closed - Reconnecting")
+            continue
+
+
+async def dummy_output(queue: asyncio.Queue[DecodedTxLogs]):
+    while True:
+        log = await queue.get()
+        pprint.pprint(log)
+
+
+def setup_outputs(renv: RenderingEnv) -> Tuple[List[asyncio.Queue], List[Awaitable]]:
+    # TODO: implement outputs...
+    output_queue: asyncio.Queue[DecodedTxLogs] = asyncio.Queue()
+    worker = dummy_output(output_queue)
+    return [output_queue], [worker]
 
 
 async def listen_events(args):
@@ -217,27 +272,25 @@ async def listen_events(args):
     else:
         ws_url = args.rpc_url
 
-    first_loop = True
     renv = None
     block_tree = BlockTree()
     if not args.subscriptions:
         raise argparse.ArgumentTypeError("Missing --subscriptions argument")
-    subscriptions_file = yaml.load(open(args.subscriptions), yaml.SafeLoader)
 
-    async for w3 in AsyncWeb3(WebSocketProvider(ws_url)):
-        try:
-            if first_loop:
-                renv = await setup_rendering_env_async(args, w3)
-                ab = address_book.get_default()
-                subscriptions = load_subscriptions(
-                    subscriptions_file.get("subscriptions", subscriptions_file.get("hooks", {})), ab
-                )
-                subscriptions = list(subscriptions)
-                first_loop = False
-            await _do_listen_events(w3, block_tree, renv, subscriptions)
-        except websockets.ConnectionClosed:
-            _logger.warn("WebSocket connection closed - Reconnecting")
-            continue
+    renv = setup_rendering_env(args)
+
+    # Load Subscription list
+    subscriptions_file = yaml.load(open(args.subscriptions), yaml.SafeLoader)
+    ab = address_book.get_default()
+    subscriptions = load_subscriptions(subscriptions_file.get("subscriptions", subscriptions_file.get("hooks", {})), ab)
+    subscriptions = list(subscriptions)
+
+    raw_logs = asyncio.Queue()
+    output_queues, output_workers = setup_outputs(renv)
+
+    parse_worker = parse_raw_events(renv, raw_logs, output_queues)
+    listen_worker = _websocket_loop(ws_url, lambda w3: _do_listen_events(w3, block_tree, renv, subscriptions, raw_logs))
+    await asyncio.gather(listen_worker, parse_worker, *output_workers)
 
 
 def render_events(renv: RenderingEnv, input: str):
@@ -434,6 +487,12 @@ def parse_args(args):
         type=str,
         help="Yaml file with the address and topics to subscribe to",
         default=os.environ.get("SUBSCRIPTIONS"),
+    )
+    listen_events.add_argument(
+        "outputs",
+        type=str,
+        nargs="+",
+        help="A list of strings with the different outputs where the logs will be sent",
     )
 
     return parser.parse_args(args)

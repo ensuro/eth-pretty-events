@@ -76,6 +76,9 @@ class Block:
     number: int
     chain: Chain
 
+    def __hash__(self) -> int:
+        return hash(self.hash)
+
 
 @dataclass
 class Tx:
