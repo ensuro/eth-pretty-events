@@ -4,7 +4,6 @@ import itertools
 import json
 import logging
 import os
-import pprint
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
@@ -20,16 +19,14 @@ from web3.exceptions import ExtraDataLengthError
 from web3.middleware import ExtraDataToPOAMiddleware
 from web3.providers.persistent import WebSocketProvider
 
-from eth_pretty_events import __version__, address_book, decode_events, render
-from eth_pretty_events.block_tree import BlockTree
-from eth_pretty_events.event_filter import (
-    TemplateRule,
-    find_template,
-    read_template_rules,
-)
-from eth_pretty_events.event_parser import EventDefinition
-from eth_pretty_events.event_subscriptions import load_subscriptions
-from eth_pretty_events.types import Address, Block, Chain, Event, Hash, Tx
+from . import discord  # noqa - To load the discord output
+from . import __version__, address_book, decode_events, render
+from .block_tree import BlockTree
+from .event_filter import TemplateRule, find_template, read_template_rules
+from .event_parser import EventDefinition
+from .event_subscriptions import load_subscriptions
+from .outputs import DecodedTxLogs, OutputBase
+from .types import Address, Block, Chain, Hash, Tx
 
 __author__ = "Guillermo M. Narvaja"
 __copyright__ = "Guillermo M. Narvaja"
@@ -60,13 +57,6 @@ class RenderingEnv:
     chain: Chain
     template_rules: Sequence[TemplateRule]
     args: Any
-
-
-@dataclass
-class DecodedTxLogs:
-    tx: Tx
-    raw_logs: List[web3types.LogReceipt]
-    decoded_logs: List[Optional[Event]]
 
 
 def _setup_web3(args) -> Optional[Web3]:
@@ -179,7 +169,6 @@ async def _do_listen_events(
 
     async for payload in w3.socket.process_subscriptions():
         if payload["subscription"] == block_headers_sub_id:
-            print(json.dumps(payload, cls=Web3JsonEncoder, indent=2))
             blocks_seen += 1
 
             # Adds the block to the tree
@@ -191,7 +180,6 @@ async def _do_listen_events(
             if fork_number != last_fork_number:
                 _logger.info(f"New fork found {block.number}: {parent_hash} => {block.hash}")
                 last_fork_number = fork_number
-            block_tree.dump()
 
             # Block tree cleanup, needed to release memory and to drop forked logs
             if blocks_seen % renv.args.block_tree_cleanup == 0:
@@ -236,6 +224,7 @@ async def parse_raw_events(
             decoded_log = DecodedTxLogs(tx, tx_logs, decoded_events)
             for queue in processed_logs:
                 await queue.put(decoded_log)
+        raw_logs.task_done()
 
 
 async def _websocket_loop(ws_url, do_stuff_fn):
@@ -247,21 +236,20 @@ async def _websocket_loop(ws_url, do_stuff_fn):
                 w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
             await do_stuff_fn(w3)
         except websockets.ConnectionClosed:
-            _logger.warn("WebSocket connection closed - Reconnecting")
+            _logger.warning("WebSocket connection closed - Reconnecting")
             continue
 
 
-async def dummy_output(queue: asyncio.Queue[DecodedTxLogs]):
-    while True:
-        log = await queue.get()
-        pprint.pprint(log)
-
-
 def setup_outputs(renv: RenderingEnv) -> Tuple[List[asyncio.Queue], List[Awaitable]]:
-    # TODO: implement outputs...
-    output_queue: asyncio.Queue[DecodedTxLogs] = asyncio.Queue()
-    worker = dummy_output(output_queue)
-    return [output_queue], [worker]
+    output_queues = []
+    workers = []
+    for output_url in renv.args.outputs:
+        output_queue: asyncio.Queue[DecodedTxLogs] = asyncio.Queue()
+        output = OutputBase.build_output(output_queue, output_url, renv)
+        output_queues.append(output_queue)
+        workers.append(output.run())
+
+    return output_queues, workers
 
 
 async def listen_events(args):
