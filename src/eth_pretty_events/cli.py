@@ -1,26 +1,32 @@
 import argparse
+import asyncio
 import itertools
 import json
 import logging
 import os
 import sys
+from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Optional, Sequence
+from typing import Any, Awaitable, List, Optional, Sequence, Tuple
 
 import jinja2
+import websockets
 import yaml
-from web3 import Web3
+from web3 import AsyncWeb3, Web3
+from web3 import types as web3types
+from web3._utils.encoding import Web3JsonEncoder
 from web3.exceptions import ExtraDataLengthError
 from web3.middleware import ExtraDataToPOAMiddleware
+from web3.providers.persistent import WebSocketProvider
 
-from eth_pretty_events import __version__, address_book, decode_events, render
-from eth_pretty_events.event_filter import (
-    TemplateRule,
-    find_template,
-    read_template_rules,
-)
-from eth_pretty_events.event_parser import EventDefinition
-from eth_pretty_events.types import Address, Chain
+from . import discord  # noqa - To load the discord output
+from . import __version__, address_book, decode_events, render
+from .block_tree import BlockTree
+from .event_filter import TemplateRule, find_template, read_template_rules
+from .event_parser import EventDefinition
+from .event_subscriptions import load_subscriptions
+from .outputs import DecodedTxLogs, OutputBase
+from .types import Address, Block, Chain, Hash, Tx
 
 __author__ = "Guillermo M. Narvaja"
 __copyright__ = "Guillermo M. Narvaja"
@@ -77,7 +83,7 @@ def _setup_address_book(args, _: Optional[Web3]):
         address_book.setup_default(class_(addr_data))
 
 
-def _env_globals(args, w3):
+def _env_globals(args, w3_chain_id):
     ret = {}
     if args.bytes32_rainbow:
         ret["b32_rainbow"] = json.load(open(args.bytes32_rainbow))
@@ -87,12 +93,12 @@ def _env_globals(args, w3):
 
     if args.chain_id:
         chain_id = ret["chain_id"] = int(args.chain_id)
-        if w3 and chain_id != w3.eth.chain_id:
+        if w3_chain_id is not None and chain_id != w3_chain_id:
             raise argparse.ArgumentTypeError(
-                f"--chain-id={chain_id} differs with the id of the RPC connection {w3.eth.chain_id}"
+                f"--chain-id={chain_id} differs with the id of the RPC connection {w3_chain_id}"
             )
-    elif w3:
-        chain_id = ret["chain_id"] = w3.eth.chain_id
+    elif w3_chain_id:
+        chain_id = ret["chain_id"] = w3_chain_id
     else:
         raise argparse.ArgumentTypeError("Either --chain-id or --rpc-url must be specified")
 
@@ -116,7 +122,7 @@ def setup_rendering_env(args) -> RenderingEnv:
     """Sets up the rendering environment"""
     EventDefinition.load_all_events(args.abi_paths)
     w3 = _setup_web3(args)
-    env_globals = _env_globals(args, w3)
+    env_globals = _env_globals(args, w3.eth.chain_id if w3 is not None else None)
     chain = env_globals["chain"]
 
     _setup_address_book(args, w3)
@@ -131,6 +137,148 @@ def setup_rendering_env(args) -> RenderingEnv:
         chain=chain,
         args=args,
     )
+
+
+async def _do_listen_events(
+    w3: AsyncWeb3,
+    block_tree: BlockTree,
+    renv: RenderingEnv,
+    subscriptions: list,
+    raw_logs: asyncio.Queue[Tuple[Block, List[web3types.LogReceipt]]],
+):
+    block_headers_sub_id = await w3.eth.subscribe("newHeads")
+    _logger.info(f"Block Headers Subscription: {block_headers_sub_id}")
+    last_fork_number = None
+
+    blocks_seen = 0
+
+    log_subscriptions = {}
+    for name, addresses, topics in subscriptions:
+        log_subscriptions[name] = await w3.eth.subscribe(
+            "logs",
+            {
+                "address": addresses,
+                # Transfer from any address to 0x4c56A8EFdd7aFd6A708641e3754801fE0538eb80
+                "topics": topics,
+            },
+        )
+        _logger.info(f"Subscription for {name}: {log_subscriptions[name]}")
+
+    waitlist_logs: dict[Block, List] = defaultdict(list)
+    timestamp_cache: dict[Hash, int] = {}  # TODO: add some cleanup
+
+    async for payload in w3.socket.process_subscriptions():
+        if payload["subscription"] == block_headers_sub_id:
+            blocks_seen += 1
+
+            # Adds the block to the tree
+            raw_block = payload["result"]
+            block = Block(Hash(raw_block["hash"]), raw_block["timestamp"], raw_block["number"], renv.chain)
+            timestamp_cache[block.hash] = block.timestamp
+            parent_hash = Hash(raw_block["parentHash"])
+            fork_number = block_tree.add_block(block.number, parent_hash, block.hash)
+            if fork_number != last_fork_number:
+                _logger.info(f"New fork found {block.number}: {parent_hash} => {block.hash}")
+                last_fork_number = fork_number
+
+            # Block tree cleanup, needed to release memory and to drop forked logs
+            if blocks_seen % renv.args.block_tree_cleanup == 0:
+                block_tree.clean(renv.args.block_tree_cleanup)
+
+            # Pushes to the queue the logs that have enough confirmations
+            for block in sorted(waitlist_logs.keys(), key=lambda x: x.number):
+                confirmations = block_tree.confirmations(block.number, block.hash)
+                if confirmations >= 0 and confirmations < renv.args.n_confirmations:
+                    continue  # TODO: check if break would be better
+                payloads = waitlist_logs.pop(block)
+                if confirmations == -1:
+                    # Drop logs, they were part of a deleted fork
+                    _logger.info("Droping logs in non confirmed fork {block_number}: {block_hash}")
+                    for pl in payloads:
+                        print(json.dumps(pl, cls=Web3JsonEncoder, indent=2))
+                else:  # confirmations >= renv.args.n_confirmations:
+                    await raw_logs.put((block, [pl["result"] for pl in payloads]))
+        else:
+            raw_log: web3types.LogReceipt = payload["result"]
+            block_hash = Hash(raw_log["blockHash"])
+            timestamp = timestamp_cache[block_hash]  # Assumes the block was received previously
+            block = Block(block_hash, timestamp, raw_log["blockNumber"], renv.chain)
+            waitlist_logs[block].append(payload)
+
+    assert w3.is_connected()
+
+
+async def parse_raw_events(
+    renv: RenderingEnv, raw_logs: asyncio.Queue, processed_logs: List[asyncio.Queue[DecodedTxLogs]]
+):
+    """Processes the raw logs, enrichs them (decoding) and groups by TX"""
+    while True:
+        block: Block
+        logs: List[web3types.LogReceipt]
+        block, logs = await raw_logs.get()
+
+        for tx_hash, tx_logs in itertools.groupby(logs, key=lambda x: x["transactionHash"]):
+            tx_logs = list(tx_logs)
+            tx = Tx(Hash(tx_hash), tx_logs[0]["transactionIndex"], block)
+            decoded_events = list(decode_events.decode_events_from_raw_logs(block, tx, tx_logs))
+            decoded_log = DecodedTxLogs(tx, tx_logs, decoded_events)
+            for queue in processed_logs:
+                await queue.put(decoded_log)
+        raw_logs.task_done()
+
+
+async def _websocket_loop(ws_url, do_stuff_fn):
+    async for w3 in AsyncWeb3(WebSocketProvider(ws_url)):
+        try:
+            try:
+                await w3.eth.get_block("latest")
+            except ExtraDataLengthError:
+                w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+            await do_stuff_fn(w3)
+        except websockets.ConnectionClosed:
+            _logger.warning("WebSocket connection closed - Reconnecting")
+            continue
+
+
+def setup_outputs(renv: RenderingEnv) -> Tuple[List[asyncio.Queue], List[Awaitable]]:
+    output_queues = []
+    workers = []
+    for output_url in renv.args.outputs:
+        output_queue: asyncio.Queue[DecodedTxLogs] = asyncio.Queue()
+        output = OutputBase.build_output(output_queue, output_url, renv)
+        output_queues.append(output_queue)
+        workers.append(output.run())
+
+    return output_queues, workers
+
+
+async def listen_events(args):
+    if args.rpc_url is None:
+        raise argparse.ArgumentTypeError("Missing --rpc-url argument")
+    if args.rpc_url.startswith("https://"):
+        ws_url = args.rpc_url.replace("https://", "wss://")
+    else:
+        ws_url = args.rpc_url
+
+    renv = None
+    block_tree = BlockTree()
+    if not args.subscriptions:
+        raise argparse.ArgumentTypeError("Missing --subscriptions argument")
+
+    renv = setup_rendering_env(args)
+
+    # Load Subscription list
+    subscriptions_file = yaml.load(open(args.subscriptions), yaml.SafeLoader)
+    ab = address_book.get_default()
+    subscriptions = load_subscriptions(subscriptions_file.get("subscriptions", subscriptions_file.get("hooks", {})), ab)
+    subscriptions = list(subscriptions)
+
+    raw_logs = asyncio.Queue()
+    output_queues, output_workers = setup_outputs(renv)
+
+    parse_worker = parse_raw_events(renv, raw_logs, output_queues)
+    listen_worker = _websocket_loop(ws_url, lambda w3: _do_listen_events(w3, block_tree, renv, subscriptions, raw_logs))
+    await asyncio.gather(listen_worker, parse_worker, *output_workers)
 
 
 def render_events(renv: RenderingEnv, input: str):
@@ -186,11 +334,11 @@ def _env_list(env_var) -> Optional[Sequence[str]]:
     return None
 
 
-def _env_int(env_var) -> Optional[int]:
+def _env_int(env_var, default=None) -> Optional[int]:
     value = os.environ.get(env_var)
     if value is not None:
         return int(value)
-    return None
+    return default
 
 
 def _env_alchemy_keys(env) -> dict:
@@ -306,6 +454,35 @@ def parse_args(args):
     flask_gunicorn.add_argument(
         "--rollbar-env", type=str, help="Name of the rollbar environment", default=os.environ.get("ROLLBAR_ENVIRONMENT")
     )
+
+    listen_events = subparsers.add_parser("listen_events")
+    listen_events.add_argument(
+        "--n-confirmations",
+        type=int,
+        help="Number of confirmations required to consider a block finalized",
+        default=_env_int("N_CONFIRMATIONS", 32),
+    )
+
+    listen_events.add_argument(
+        "--block-tree-cleanup",
+        type=int,
+        help="Number of blocks to store in the block tree",
+        default=_env_int("BLOCK_TREE_CLEANUP", 64),
+    )
+
+    listen_events.add_argument(
+        "--subscriptions",
+        type=str,
+        help="Yaml file with the address and topics to subscribe to",
+        default=os.environ.get("SUBSCRIPTIONS"),
+    )
+    listen_events.add_argument(
+        "outputs",
+        type=str,
+        nargs="+",
+        help="A list of strings with the different outputs where the logs will be sent",
+    )
+
     return parser.parse_args(args)
 
 
@@ -327,6 +504,8 @@ def main(args):
     elif args.command == "render_events":
         renv = setup_rendering_env(args)
         render_events(renv, args.input)
+    elif args.command == "listen_events":
+        asyncio.run(listen_events(args))
     elif args.command in ("flask_dev", "flask_gunicorn"):
         from . import flask_app
 

@@ -1,6 +1,7 @@
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Sequence
 
 from web3 import Web3
+from web3 import types as web3types
 
 from .alchemy_utils import graphql_log_to_log_receipt
 from .event_parser import EventDefinition
@@ -32,6 +33,12 @@ def decode_events_from_tx(tx_hash: str, w3: Web3, chain: Chain) -> Iterable[Opti
     )
     tx = Tx(block=block, hash=Hash(receipt.transactionHash), index=receipt.transactionIndex)
     return (EventDefinition.read_log(log, block=block, tx=tx) for log in receipt.logs)
+
+
+def decode_events_from_raw_logs(
+    block: Block, tx: Tx, logs: Sequence[web3types.LogReceipt]
+) -> Iterable[Optional[Event]]:
+    return (EventDefinition.read_log(log, block=block, tx=tx) for log in logs)
 
 
 def decode_events_from_block(block_number: int, w3: Web3, chain: Chain) -> Iterable[Optional[Event]]:
