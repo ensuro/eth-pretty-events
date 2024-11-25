@@ -1,0 +1,7 @@
+hooks:
+  cash_to:
+    addresses:
+      - USDC
+    topics:
+      - value: "Transfer(address,address,uint256)"
+        transform: topic_sig

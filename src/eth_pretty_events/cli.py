@@ -20,6 +20,7 @@ from web3.middleware import ExtraDataToPOAMiddleware
 from web3.providers.persistent import WebSocketProvider
 
 from . import discord  # noqa - To load the discord output
+from . import pubsub  # noqa - To load the pubsub output
 from . import __version__, address_book, decode_events, render
 from .block_tree import BlockTree
 from .event_filter import TemplateRule, find_template, read_template_rules
