@@ -33,8 +33,8 @@ class PubSubOutputBase(OutputBase):
             self.topic_path = self.publisher.topic_path(self.project_id, self.topic)
 
     async def publish_message(self, message):
+        formatted_message = json.dumps(message, cls=Web3JsonEncoder)
         try:
-            formatted_message = json.dumps(message, cls=Web3JsonEncoder)
             publish = self.publisher.publish(self.topic_path, formatted_message.encode("utf-8"))
             message_id = publish.result()
             _logger.info(f"Published message to Pub/Sub with ID: {message_id}")
@@ -81,6 +81,7 @@ class PubSubDecodedLogsOutput(PubSubOutputBase):
                     "address": decoded_log.address,
                     "logIndex": decoded_log.log_index,
                     "args": decoded_log.args._asdict() if decoded_log.args else {},
+                    "abi": decoded_log.args._components,
                 }
                 for decoded_log in log.decoded_logs
                 if decoded_log
