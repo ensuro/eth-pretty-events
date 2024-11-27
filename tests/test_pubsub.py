@@ -17,7 +17,12 @@ from eth_pretty_events.types import Block, Chain, Event, Hash, Tx, make_abi_name
 @pytest.fixture
 def mock_future():
     class MockFuture:
+        def __init__(self, raise_exception=False):
+            self.raise_exception = raise_exception
+
         def result(self):
+            if self.raise_exception:
+                raise RuntimeError("Mocked publish failure")
             return "mock-message-id"
 
     return MockFuture
@@ -53,8 +58,7 @@ def test_pubsub_output_base_missing_project_id_or_topic(dummy_queue, dummy_renv)
         PubSubDecodedLogsOutput(dummy_queue, url_without_both, dummy_renv)
 
 
-@pytest.mark.asyncio
-async def test_pubsub_raw_logs_output_with_dry_run(dummy_queue, dummy_renv, caplog):
+def test_pubsub_raw_logs_output_with_dry_run(dummy_queue, dummy_renv, caplog):
     url = urlparse("pubsubrawlogs://?project_id=test_project&topic=test_topic&dry_run=true")
     output = PubSubRawLogsOutput(dummy_queue, url, dummy_renv)
 
@@ -83,31 +87,30 @@ async def test_pubsub_raw_logs_output_with_dry_run(dummy_queue, dummy_renv, capl
     log = DecodedTxLogs(tx=tx, raw_logs=raw_logs, decoded_logs=[])
 
     with caplog.at_level("INFO"):
-        await output.send_to_output(log)
+        asyncio.run(output.send_to_output(log))
 
-        expected_message = {
-            "transactionHash": "0x4c0883a6910395bae0f94c2e1d2c37bd2e8d6c5797b7c3f8d36dd05e5f13606f",
-            "blockHash": "0x5d7c5e1ce2f3410de4c99f172ddfcb087a821440134d25e7ab8353ce57e770cc",
-            "blockNumber": 123456,
-            "blockTimestamp": 1635600000,
-            "chainId": 1,
-            "transactionIndex": 0,
-            "logs": [
-                {
-                    "address": "0x742d35cc6634c0532925a3b844bc454e4438f44e",
-                    "topics": ["0x8c5be1e5ebec7d5bd14f714f6a97220d02b17d3c8c9f32f4d7f7e0c2a9d2f22b"],
-                    "data": "0x0000000000000000000000000000000000000000000000000000000000000001",
-                    "logIndex": 0,
-                }
-            ],
-        }
+    expected_message = {
+        "transactionHash": "0x4c0883a6910395bae0f94c2e1d2c37bd2e8d6c5797b7c3f8d36dd05e5f13606f",
+        "blockHash": "0x5d7c5e1ce2f3410de4c99f172ddfcb087a821440134d25e7ab8353ce57e770cc",
+        "blockNumber": 123456,
+        "blockTimestamp": 1635600000,
+        "chainId": 1,
+        "transactionIndex": 0,
+        "logs": [
+            {
+                "address": "0x742d35cc6634c0532925a3b844bc454e4438f44e",
+                "topics": ["0x8c5be1e5ebec7d5bd14f714f6a97220d02b17d3c8c9f32f4d7f7e0c2a9d2f22b"],
+                "data": "0x0000000000000000000000000000000000000000000000000000000000000001",
+                "logIndex": 0,
+            }
+        ],
+    }
 
-        assert "[Dry Run] Publishing to" in caplog.text
-        assert json.dumps(expected_message, indent=2) in caplog.text
+    assert "[Dry Run] Publishing to" in caplog.text
+    assert json.dumps(expected_message, indent=2) in caplog.text
 
 
-@pytest.mark.asyncio
-async def test_pubsub_raw_logs_output_production(dummy_queue, dummy_renv, mock_future):
+def test_pubsub_raw_logs_output_production(dummy_queue, dummy_renv, mock_future):
     url = urlparse("pubsubrawlogs://?project_id=test_project&topic=test_topic&dry_run=false")
 
     with patch("eth_pretty_events.pubsub.pubsub_v1.PublisherClient") as mock_publisher:
@@ -140,9 +143,9 @@ async def test_pubsub_raw_logs_output_production(dummy_queue, dummy_renv, mock_f
         ]
         log = DecodedTxLogs(tx=tx, raw_logs=raw_logs, decoded_logs=[])
 
-        mock_publisher_instance.publish.return_value = mock_future
+        mock_publisher_instance.publish.return_value = mock_future()
 
-        await output.send_to_output(log)
+        asyncio.run(output.send_to_output(log))
 
         expected_message = {
             "transactionHash": "0x4c0883a6910395bae0f94c2e1d2c37bd2e8d6c5797b7c3f8d36dd05e5f13606f",
@@ -167,8 +170,7 @@ async def test_pubsub_raw_logs_output_production(dummy_queue, dummy_renv, mock_f
         )
 
 
-@pytest.mark.asyncio
-async def test_pubsub_decoded_logs_output_with_dry_run(dummy_queue, dummy_renv, caplog):
+def test_pubsub_decoded_logs_output_with_dry_run(dummy_queue, dummy_renv, caplog):
     url = urlparse("pubsubdecodedlogs://?project_id=test_project&topic=test_topic&dry_run=true")
     output = PubSubDecodedLogsOutput(dummy_queue, url, dummy_renv)
 
@@ -208,7 +210,7 @@ async def test_pubsub_decoded_logs_output_with_dry_run(dummy_queue, dummy_renv, 
     log = DecodedTxLogs(tx=tx, raw_logs=[], decoded_logs=[decoded_event])
 
     with caplog.at_level("INFO"):
-        await output.send_to_output(log)
+        asyncio.run(output.send_to_output(log))
 
         expected_message = {
             "transactionHash": "0x4c0883a6910395bae0f94c2e1d2c37bd2e8d6c5797b7c3f8d36dd05e5f13606f",
@@ -240,8 +242,7 @@ async def test_pubsub_decoded_logs_output_with_dry_run(dummy_queue, dummy_renv, 
         assert json.dumps(expected_message, indent=2) in caplog.text
 
 
-@pytest.mark.asyncio
-async def test_pubsub_decoded_logs_output_production(dummy_queue, dummy_renv, mock_future):
+def test_pubsub_decoded_logs_output_production(dummy_queue, dummy_renv, mock_future):
     url = urlparse("pubsubdecodedlogs://?project_id=test_project&topic=test_topic&dry_run=false")
 
     with patch("eth_pretty_events.pubsub.pubsub_v1.PublisherClient") as mock_publisher:
@@ -287,7 +288,7 @@ async def test_pubsub_decoded_logs_output_production(dummy_queue, dummy_renv, mo
 
         mock_publisher_instance.publish.return_value = mock_future()
 
-        await output.send_to_output(log)
+        asyncio.run(output.send_to_output(log))
 
         expected_message = {
             "transactionHash": "0x4c0883a6910395bae0f94c2e1d2c37bd2e8d6c5797b7c3f8d36dd05e5f13606f",
@@ -319,6 +320,29 @@ async def test_pubsub_decoded_logs_output_production(dummy_queue, dummy_renv, mo
             "projects/test_project/topics/test_topic",
             json.dumps(expected_message).encode("utf-8"),
         )
+
+
+def test_pubsub_publish_message_exception(dummy_queue, dummy_renv, caplog, mock_future):
+    url = urlparse("pubsubrawlogs://?project_id=test_project&topic=test_topic&dry_run=false")
+
+    with patch("eth_pretty_events.pubsub.pubsub_v1.PublisherClient") as mock_publisher:
+        mock_publisher_instance = mock_publisher.return_value
+        mock_publisher_instance.topic_path.return_value = "projects/test_project/topics/test_topic"
+
+        output = PubSubRawLogsOutput(dummy_queue, url, dummy_renv)
+
+        mock_publisher_instance.publish.return_value = mock_future(raise_exception=True)
+
+        message = {
+            "transactionHash": "0x4c0883a6910395bae0f94c2e1d2c37bd2e8d6c5797b7c3f8d36dd05e5f13606f",
+            "blockHash": "0x5d7c5e1ce2f3410de4c99f172ddfcb087a821440134d25e7ab8353ce57e770cc",
+            "blockNumber": 123456,
+        }
+
+        with caplog.at_level("ERROR"):
+            asyncio.run(output.publish_message(message))
+
+        assert "Failed to publish message: Mocked publish failure" in caplog.text
 
 
 def test_print_to_screen_publisher_error(caplog):
