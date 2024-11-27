@@ -17,12 +17,7 @@ from eth_pretty_events.types import Block, Chain, Event, Hash, Tx, make_abi_name
 @pytest.fixture
 def mock_future():
     class MockFuture:
-        def __init__(self, raise_exception=False):
-            self.raise_exception = raise_exception
-
         def result(self):
-            if self.raise_exception:
-                raise RuntimeError("Mocked publish failure")
             return "mock-message-id"
 
     return MockFuture
@@ -320,29 +315,6 @@ def test_pubsub_decoded_logs_output_production(dummy_queue, dummy_renv, mock_fut
             "projects/test_project/topics/test_topic",
             json.dumps(expected_message).encode("utf-8"),
         )
-
-
-def test_pubsub_publish_message_exception(dummy_queue, dummy_renv, caplog, mock_future):
-    url = urlparse("pubsubrawlogs://?project_id=test_project&topic=test_topic&dry_run=false")
-
-    with patch("eth_pretty_events.pubsub.pubsub_v1.PublisherClient") as mock_publisher:
-        mock_publisher_instance = mock_publisher.return_value
-        mock_publisher_instance.topic_path.return_value = "projects/test_project/topics/test_topic"
-
-        output = PubSubRawLogsOutput(dummy_queue, url, dummy_renv)
-
-        mock_publisher_instance.publish.return_value = mock_future(raise_exception=True)
-
-        message = {
-            "transactionHash": "0x4c0883a6910395bae0f94c2e1d2c37bd2e8d6c5797b7c3f8d36dd05e5f13606f",
-            "blockHash": "0x5d7c5e1ce2f3410de4c99f172ddfcb087a821440134d25e7ab8353ce57e770cc",
-            "blockNumber": 123456,
-        }
-
-        with caplog.at_level("ERROR"):
-            asyncio.run(output.publish_message(message))
-
-        assert "Failed to publish message: Mocked publish failure" in caplog.text
 
 
 def test_print_to_screen_publisher_error(caplog):

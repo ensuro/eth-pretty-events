@@ -34,12 +34,9 @@ class PubSubOutputBase(OutputBase):
 
     async def publish_message(self, message):
         formatted_message = json.dumps(message, cls=Web3JsonEncoder)
-        try:
-            publish = self.publisher.publish(self.topic_path, formatted_message.encode("utf-8"))
-            message_id = publish.result()
-            _logger.info(f"Published message to Pub/Sub with ID: {message_id}")
-        except Exception as e:
-            _logger.error(f"Failed to publish message: {e}")
+        publish = self.publisher.publish(self.topic_path, formatted_message.encode("utf-8"))
+        message_id = publish.result()
+        _logger.info(f"Published message to Pub/Sub with ID: {message_id}")
 
 
 @OutputBase.register("pubsubrawlogs")
