@@ -39,30 +39,52 @@ class DiscordOutput(OutputBase):
         delattr(self, "session")
 
     async def send_to_output(self, log: DecodedTxLogs):
-        message = build_transaction_message(self.renv, log.tx, log.decoded_logs)
-        if message is None:
+        messages = build_transaction_message(self.renv, log.tx, log.decoded_logs)
+        if messages is None:
             return
-        async with self.session.post(self.discord_url, json=message) as response:
-            if response.status > 204:
-                _logger.warning(f"Unexpected result {response.status}")
-                _logger.warning("Discord response body: %s", await response.text())
+
+        for message in messages:
+            async with self.session.post(self.discord_url, json=message) as response:
+                if response.status > 204:
+                    _logger.warning(f"Unexpected result {response.status}")
+                    _logger.warning("Discord response body: %s", await response.text())
 
 
 def build_transaction_message(renv, tx, tx_events):
-    embeds = []
+    batches = []
+    current_batch = []
+    current_batch_size = 0
+
     for event in tx_events:
         if event is None:
             continue
         template = find_template(renv.template_rules, event)
         if template is None:
             continue
-        embeds.append({"description": render(renv.jinja_env, event, template)})
+        embed = {"description": render(renv.jinja_env, event, template)}
+        embed_size = calc_embed_size(embed)
 
-    if embeds:
-        # TODO: add main content with the tx hash and a link to explorer
-        return {"embeds": embeds}
+        if current_batch_size + embed_size > 6000 or len(current_batch) == 10:
+            batches.append({"embeds": current_batch})
+            current_batch = []
+            current_batch_size = 0
 
-    return None
+        current_batch.append(embed)
+        current_batch_size += embed_size
+
+    if current_batch:
+        batches.append({"embeds": current_batch})
+
+    return batches
+
+
+def calc_embed_size(embed):
+    size = len(embed.get("description", ""))
+    size += len(embed.get("title", ""))
+    size += len(embed.get("footer", {}).get("text", ""))
+    for field in embed.get("fields", []):
+        size += len(field.get("name", "")) + len(field.get("value", ""))
+    return size
 
 
 def build_and_send_messages(discord_url: str, renv, events: Iterable[Event]):
