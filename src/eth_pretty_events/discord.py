@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 from itertools import groupby
@@ -39,7 +40,7 @@ class DiscordOutput(OutputBase):
         delattr(self, "session")
 
     async def send_to_output(self, log: DecodedTxLogs):
-        messages = build_transaction_message(self.renv, log.tx, log.decoded_logs)
+        messages = build_transaction_messages(self.renv, log.tx, log.decoded_logs)
         if messages is None:
             return
 
@@ -50,8 +51,7 @@ class DiscordOutput(OutputBase):
                     _logger.warning("Discord response body: %s", await response.text())
 
 
-def build_transaction_message(renv, tx, tx_events):
-    batches = []
+def build_transaction_messages(renv, tx, tx_events):
     current_batch = []
     current_batch_size = 0
 
@@ -62,10 +62,10 @@ def build_transaction_message(renv, tx, tx_events):
         if template is None:
             continue
         embed = {"description": render(renv.jinja_env, event, template)}
-        embed_size = calc_embed_size(embed)
+        embed_size = len(json.dumps(embed))
 
-        if current_batch_size + embed_size > 6000 or len(current_batch) == 10:
-            batches.append({"embeds": current_batch})
+        if current_batch_size + embed_size > 5000 or len(current_batch) == 9:
+            yield {"embeds": current_batch}
             current_batch = []
             current_batch_size = 0
 
@@ -73,18 +73,7 @@ def build_transaction_message(renv, tx, tx_events):
         current_batch_size += embed_size
 
     if current_batch:
-        batches.append({"embeds": current_batch})
-
-    return batches
-
-
-def calc_embed_size(embed):
-    size = len(embed.get("description", ""))
-    size += len(embed.get("title", ""))
-    size += len(embed.get("footer", {}).get("text", ""))
-    for field in embed.get("fields", []):
-        size += len(field.get("name", "")) + len(field.get("value", ""))
-    return size
+        yield {"embeds": current_batch}
 
 
 def build_and_send_messages(discord_url: str, renv, events: Iterable[Event]):
@@ -102,12 +91,11 @@ def build_and_send_messages(discord_url: str, renv, events: Iterable[Event]):
 
     responses = []
     for tx, tx_events in grouped_events:
-        message = build_transaction_message(renv, tx, tx_events)
-        if message is None:
-            continue
-
-        response = post(discord_url, message)
-        responses.append(response)
+        for message in build_transaction_messages(renv, tx, tx_events):
+            if message is None:
+                continue
+            response = post(discord_url, message)
+            responses.append(response)
 
     return responses
 

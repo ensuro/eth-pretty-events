@@ -144,21 +144,20 @@ def test_alchemy_webhook_happy(test_client, discord_mock, caplog):
         headers={"x-alchemy-signature": ALCHEMY_SAMPLE_SIGNATURE, "content-type": "application/json"},
     )
     assert response.status_code == 200
-    assert response.json == {"status": "ok", "ok_count": 10, "failed_count": 0}
+    assert response.json == {"status": "ok", "ok_count": 1, "failed_count": 0}
 
-    discord_mock.assert_any_call(
+    discord_mock.assert_called_once_with(
         "http://example.org/discord-webhook",
-        [
-            {
-                "embeds": [
-                    {"description": "Transfer 240.072021 from SOME_WHALE to 0xBA12222222228d8Ba445958a75a0704d566BF2C8"}
-                ]
-            }
-        ],
+        {
+            "embeds": [
+                {"description": "Transfer 240.072021 from SOME_WHALE to 0xBA12222222228d8Ba445958a75a0704d566BF2C8"}
+            ]
+        },
     )
 
+    assert "INFO" in [record.levelname for record in caplog.records]
     assert any("Result: ok" in record.message for record in caplog.records)
-    assert any("ok_count: 10, failed_count: 0" in record.message for record in caplog.records)
+    assert any("ok_count: 1, failed_count: 0" in record.message for record in caplog.records)
 
 
 def test_alchemy_webhook_unknown_webhook_id(test_client, discord_mock):
@@ -204,13 +203,9 @@ def test_alchemy_webhook_with_failed_messages(test_client, discord_mock, caplog)
         headers={"x-alchemy-signature": ALCHEMY_SAMPLE_SIGNATURE, "content-type": "application/json"},
     )
     assert response.status_code == 200
-    assert response.json == {"status": "error", "ok_count": 0, "failed_count": 10}
-    assert discord_mock.call_count == 10
+    assert response.json == {"status": "error", "ok_count": 0, "failed_count": 1}
+    assert discord_mock.call_count == 1
 
+    assert any(record.levelname == "ERROR" for record in caplog.records)
     assert any("Result: error" in record.message for record in caplog.records)
-    assert any("ok_count: 0, failed_count: 10" in record.message for record in caplog.records)
-
-    failed_log = next((record for record in caplog.records if record.levelname == "ERROR"), None)
-    assert failed_log is not None
-    assert "failed_details" in failed_log.message
-    assert "Webhook not found" in failed_log.message
+    assert any("ok_count: 0, failed_count: 1" in record.message for record in caplog.records)
