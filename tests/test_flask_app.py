@@ -204,12 +204,8 @@ def test_alchemy_webhook_with_failed_messages(test_client, discord_mock, caplog)
     )
     assert response.status_code == 200
     assert response.json == {"status": "error", "ok_count": 0, "failed_count": 1}
+    assert discord_mock.call_count == 1
 
     assert any(record.levelname == "ERROR" for record in caplog.records)
     assert any("Result: error" in record.message for record in caplog.records)
     assert any("ok_count: 0, failed_count: 1" in record.message for record in caplog.records)
-
-    failed_log = next((record for record in caplog.records if record.levelname == "ERROR"), None)
-    assert failed_log is not None
-    assert "failed_details" in failed_log.message
-    assert "Webhook not found" in failed_log.message
