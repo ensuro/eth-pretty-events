@@ -4,16 +4,20 @@ from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
 import pytest
+import requests
+from aiohttp import web
 from jinja2 import Environment, FunctionLoader
 
 from eth_pretty_events.discord import (
     DiscordOutput,
     build_and_send_messages,
     build_transaction_messages,
+    post,
 )
 from eth_pretty_events.event_filter import read_template_rules
 from eth_pretty_events.jinja2_ext import add_filters
-from eth_pretty_events.types import Block, Chain, Event, Hash, Tx
+from eth_pretty_events.outputs import DecodedTxLogs
+from eth_pretty_events.types import Block, Chain, Event, Hash, Tx, make_abi_namedtuple
 
 
 @pytest.fixture
@@ -64,8 +68,8 @@ def template_rules():
 
 
 @pytest.fixture
-def sample_tx_and_events():
-    tx = Tx(
+def mock_tx():
+    return Tx(
         block=Block(
             hash=Hash("0x578e4e045d37a7485bfcb634e514f6dbdca62ea1e29e8180d15de940046858eb"),
             number=123456,
@@ -76,25 +80,60 @@ def sample_tx_and_events():
         index=1,
     )
 
+
+@pytest.fixture
+def alchemy_sample_events(mock_tx):
     with open("samples/alchemy-sample.json") as f:
         samples = json.load(f)
 
-    tx_events = [
+    abi_components = [
+        {"name": "from_", "type": "address"},
+        {"name": "to", "type": "address"},
+        {"name": "value", "type": "uint256"},
+    ]
+    Args = make_abi_namedtuple("Transfer", abi_components)
+
+    return [
         Event(
             address=log["account"]["address"],
-            args={
-                "from": log["topics"][1],
-                "to": log["topics"][2],
-                "value": int(log["data"], 16),
-            },
-            tx=tx,
+            args=Args(
+                from_=log["topics"][1],
+                to=log["topics"][2],
+                value=int(log["data"], 16),
+            ),
+            tx=mock_tx,
             name="Transfer",
             log_index=log["index"],
         )
         for log in samples["event"]["data"]["block"]["logs"]
     ]
 
-    return tx, tx_events
+
+@pytest.fixture
+async def setup_output(aiohttp_client, dummy_renv, template_rules, template_loader):
+    dummy_renv.template_rules = template_rules
+    dummy_renv.jinja_env = Environment(loader=FunctionLoader(template_loader))
+    add_filters(dummy_renv.jinja_env)
+
+    async def webhook_handler(request):
+        payload = await request.json()
+        request.app["payloads"].append(payload)
+        return web.Response(status=200)
+
+    app = web.Application()
+    app.router.add_post("/webhook", webhook_handler)
+    app["payloads"] = []
+    app["status_code"] = 200
+
+    client = await aiohttp_client(app)
+    webhook_url = client.make_url("/webhook")
+
+    queue = asyncio.Queue()
+    url = "discord://?from_env=DISCORD_URL"
+    with patch.dict("os.environ", {"DISCORD_URL": str(webhook_url)}):
+        output = DiscordOutput(queue, urlparse(url), dummy_renv)
+
+    return output, queue, app
 
 
 def test_discord_output_missing_env_var(dummy_queue, dummy_renv):
@@ -110,32 +149,165 @@ def test_discord_output_with_env_var(dummy_queue, dummy_renv):
         assert output.discord_url == "https://discord.com/api/webhooks/test"
 
 
-def test_build_transaction_messages_limits(dummy_renv, template_rules, template_loader, sample_tx_and_events):
+def test_build_transaction_messages_limits(dummy_renv, template_rules, template_loader, mock_tx, alchemy_sample_events):
     dummy_renv.template_rules = template_rules
     dummy_renv.jinja_env = Environment(loader=FunctionLoader(template_loader))
     add_filters(dummy_renv.jinja_env)
 
-    tx, tx_events = sample_tx_and_events
-
-    messages = list(build_transaction_messages(dummy_renv, tx, tx_events))
+    messages = list(build_transaction_messages(dummy_renv, mock_tx, alchemy_sample_events))
 
     assert len(messages) >= 1
     assert all(len(message["embeds"]) <= 9 for message in messages)
     assert all(sum(len(json.dumps(embed)) for embed in message["embeds"]) <= 5000 for message in messages)
 
 
-def test_build_and_send_messages(dummy_renv, template_rules, template_loader, sample_tx_and_events):
+def test_build_and_send_messages(dummy_renv, template_rules, template_loader, mock_tx, alchemy_sample_events):
     dummy_renv.template_rules = template_rules
     dummy_renv.jinja_env = Environment(loader=FunctionLoader(template_loader))
     add_filters(dummy_renv.jinja_env)
-
-    tx, tx_events = sample_tx_and_events
 
     with patch("eth_pretty_events.discord.post") as mock_post:
         mock_post.return_value = MagicMock(status_code=200)
 
         discord_url = "https://discord.com/api/webhooks/test"
 
-        responses = build_and_send_messages(discord_url, dummy_renv, tx_events)
+        responses = build_and_send_messages(discord_url, dummy_renv, alchemy_sample_events)
 
         assert mock_post.call_count == len(responses), f"Expected {len(responses)} calls, got {mock_post.call_count}"
+
+
+@pytest.mark.asyncio
+async def test_send_to_output_webhook_response(setup_output, alchemy_sample_events, mock_tx):
+    output, queue, app = await setup_output
+
+    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[], decoded_logs=alchemy_sample_events)
+
+    task = asyncio.create_task(output.run())
+    await queue.put(decoded_logs)
+    await asyncio.sleep(1)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert len(app["payloads"]) > 0
+    payload = app["payloads"][0]
+    assert "embeds" in payload
+    assert len(payload["embeds"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_send_to_output_warning_logs(
+    aiohttp_client, dummy_renv, template_rules, template_loader, alchemy_sample_events, mock_tx, caplog
+):
+    dummy_renv.template_rules = template_rules
+    dummy_renv.jinja_env = Environment(loader=FunctionLoader(template_loader))
+    add_filters(dummy_renv.jinja_env)
+
+    async def webhook_handler(request):
+        return web.Response(status=500, text="Internal Server Error")
+
+    app = web.Application()
+    app.router.add_post("/webhook", webhook_handler)
+    app["payloads"] = []
+
+    client = await aiohttp_client(app)
+    webhook_url = client.make_url("/webhook")
+
+    queue = asyncio.Queue()
+    url = "discord://?from_env=DISCORD_URL"
+    with patch.dict("os.environ", {"DISCORD_URL": str(webhook_url)}):
+        output = DiscordOutput(queue, urlparse(url), dummy_renv)
+
+    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[], decoded_logs=alchemy_sample_events)
+
+    with caplog.at_level("WARNING"):
+        task = asyncio.create_task(output.run())
+        await queue.put(decoded_logs)
+        await asyncio.sleep(1)
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert "Unexpected result 500" in caplog.text
+    assert "Discord response body: Internal Server Error" in caplog.text
+
+
+def test_build_transaction_messages_none_events(dummy_renv, mock_tx):
+    dummy_renv.template_rules = []
+    events = [None, Event(tx=mock_tx, address="0x0", args={}, name="TestEvent", log_index=0)]
+    messages = list(build_transaction_messages(dummy_renv, mock_tx, events))
+    assert len(messages) == 0
+
+
+@pytest.mark.asyncio
+async def test_send_to_output_none_messages(setup_output, mock_tx):
+    output, queue, _ = await setup_output
+
+    with patch("eth_pretty_events.discord.build_transaction_messages", return_value=None) as mock_build_messages:
+        decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[], decoded_logs=[])
+
+        await queue.put(decoded_logs)
+
+        await output.send_to_output(decoded_logs)
+
+        mock_build_messages.assert_called_once_with(output.renv, mock_tx, [])
+
+
+def test_build_and_send_messages_none_messages(dummy_renv, mock_tx, alchemy_sample_events):
+    with patch(
+        "eth_pretty_events.discord.build_transaction_messages",
+        side_effect=lambda renv, tx, tx_events: (
+            [None, {"embeds": [{"description": "message"}]}] if tx == mock_tx else []
+        ),
+    ) as mock_build_messages:
+        with patch("eth_pretty_events.discord.post") as mock_post:
+            mock_post.return_value = MagicMock(status_code=200)
+
+            discord_url = "https://discord.com/api/webhooks/test"
+
+            responses = build_and_send_messages(discord_url, dummy_renv, alchemy_sample_events)
+            mock_build_messages.assert_called()
+            mock_post.assert_called_once_with(discord_url, {"embeds": [{"description": "message"}]})
+            assert len(responses) == 1
+            assert responses[0].status_code == 200
+
+
+def test_post_initializes_session():
+    global _session
+    _session = None
+
+    with patch("requests.Session", autospec=True) as mock_session_class:
+        mock_session_instance = mock_session_class.return_value
+        mock_post = mock_session_instance.post
+        mock_post.return_value = MagicMock(status_code=200)
+
+        url = "https://discord.com/api/webhooks/test"
+        payload = {"key": "value"}
+        response = post(url, payload)
+
+        _session = mock_session_instance
+
+        assert _session is mock_session_instance
+
+        mock_session_class.assert_called_once()
+
+        mock_post.assert_called_once_with(url, json=payload)
+
+        assert response.status_code == 200
+
+
+def test_postin_not_itializes_session():
+    global _session
+    _session = requests.Session()
+
+    with patch.object(_session, "post", return_value=MagicMock(status_code=200)) as mock_post:
+        with patch("eth_pretty_events.discord._session", _session):
+            url = "https://discord.com/api/webhooks/test"
+            payload = {"key": "value"}
+            response = post(url, payload)
+
+            mock_post.assert_called_once_with(url, json=payload)
+
+            assert response.status_code == 200
