@@ -61,7 +61,11 @@ def build_transaction_messages(renv, tx, tx_events):
         template = find_template(renv.template_rules, event)
         if template is None:
             continue
-        embed = {"description": render(renv.jinja_env, event, template)}
+        try:
+            embed = {"description": render(renv.jinja_env, event, template)}
+        except TypeError:
+            _logger.warning("Failed rendering specific template, using generic template autoformat version.")
+            embed = {"description": render(renv.jinja_env, event, "generic-event-autoformat.md.j2")}
         embed_size = len(json.dumps(embed))
 
         if current_batch_size + embed_size > 5000 or len(current_batch) == 9:

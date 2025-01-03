@@ -202,11 +202,13 @@ async def _do_listen_events(
                     for pl in payloads:
                         print(json.dumps(pl, cls=Web3JsonEncoder, indent=2))
                 else:  # confirmations >= renv.args.n_confirmations:
+                    if block.timestamp is None:
+                        block.timestamp = timestamp_cache[block.hash]
                     await raw_logs.put((block, [pl["result"] for pl in payloads]))
         else:
             raw_log: web3types.LogReceipt = payload["result"]
             block_hash = Hash(raw_log["blockHash"])
-            timestamp = timestamp_cache[block_hash]  # Assumes the block was received previously
+            timestamp = timestamp_cache.get(block_hash, None)
             block = Block(block_hash, timestamp, raw_log["blockNumber"], renv.chain)
             waitlist_logs[block].append(payload)
 
@@ -286,7 +288,28 @@ async def listen_events(args):
     await asyncio.gather(listen_worker, parse_worker, *output_workers)
 
 
-def render_events(renv: RenderingEnv, input: str):
+async def _render_event(event, renv, output_queues=None):
+    if event is None:
+        _logger.warning("Unrecognized event tried to be rendered.")
+        return
+
+    try:
+        template_name = find_template(renv.template_rules, event)
+        rendered_event = render.render(renv.jinja_env, event, template_name)
+    except TypeError:
+        _logger.warning("Failed rendering specific template, using generic template autoformat version.")
+        rendered_event = render.render(renv.jinja_env, event, "generic-event-autoformat.md.j2")
+
+    if output_queues:
+        decoded_logs = DecodedTxLogs(event.tx, [], [event])
+        for output_queue in output_queues:
+            await output_queue.put(decoded_logs)
+    else:
+        print(rendered_event)
+        print("--------------------------")
+
+
+async def render_events(renv: RenderingEnv, input: str, outputs: Optional[List[str]] = None):
     """Renders the events found in a given input
 
     Returns:
@@ -316,14 +339,17 @@ def render_events(renv: RenderingEnv, input: str):
     else:
         raise argparse.ArgumentTypeError(f"Unknown input '{input}'")
 
+    output_queues, output_workers = (None, [])
+    if outputs:
+        output_queues, output_workers = setup_outputs(renv)
+
     for event in events:
-        if not event:
-            continue
-        template_name = find_template(renv.template_rules, event)
-        if template_name is None:
-            continue
-        print(render.render(renv.jinja_env, event, template_name))
-        print("--------------------------")
+        await _render_event(event, renv, output_queues)
+
+    if outputs:
+        for output_queue in output_queues:
+            await output_queue.put(None)
+        await asyncio.gather(*output_workers)
 
 
 # ---- CLI ----
@@ -448,6 +474,13 @@ def parse_args(args):
         help="Alchemy JSON file or TX Transaction",
     )
 
+    render_events.add_argument(
+        "outputs",
+        type=str,
+        nargs="*",
+        help="A list of strings with the different outputs where the logs will be sent",
+    )
+
     flask_dev = subparsers.add_parser("flask_dev")
     flask_dev.add_argument("--port", type=int, help="Port to start flask dev server", default=8000)
     flask_dev.add_argument("--host", type=str, help="Host to start flask dev server", default=None)
@@ -508,7 +541,7 @@ def main(args):
         print(f"{load_events(args)} events found")
     elif args.command == "render_events":
         renv = setup_rendering_env(args)
-        render_events(renv, args.input)
+        asyncio.run(render_events(renv, args.input, args.outputs))
     elif args.command == "listen_events":
         asyncio.run(listen_events(args))
     elif args.command in ("flask_dev", "flask_gunicorn"):

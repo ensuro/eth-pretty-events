@@ -1,0 +1,17 @@
+## {{ evt.name }}
+
+**TX:** {{ evt.tx.hash | tx_link }}
+**Block:** {{ evt.tx.block.number | block_link }}
+**Contract:** {{ evt.address | address_link }}
+
+**Arguments:**
+{% for arg_name in evt.args._abi_fields() -%}
+- {{ arg_name }}: {% set arg_value = evt.args[arg_name] -%}
+  {%- if arg_value is struct -%}
+    {% for sub_arg_name in arg_value._abi_fields() %}
+    - {{ sub_arg_name }}: {{ arg_value[sub_arg_name] | autoformat_arg(arg_value._field_abi(sub_arg_name)) }}
+    {%- endfor %}
+  {%- else -%}
+    {{ arg_value | autoformat_arg(evt.args._field_abi(arg_name)) }}
+  {%- endif %}
+{% endfor %}
