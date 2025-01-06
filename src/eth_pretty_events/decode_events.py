@@ -5,6 +5,7 @@ from web3 import types as web3types
 
 from .alchemy_utils import graphql_log_to_log_receipt
 from .event_parser import EventDefinition
+from .outputs import DecodedTxLogs
 from .types import Block, Chain, Event, Hash, Tx
 
 
@@ -47,9 +48,13 @@ def decode_events_from_block(block, transactions) -> Iterable[Optional[Event]]:
             yield EventDefinition.read_log(log, tx=tx, block=block)
 
 
-def decode_raw_logs_from_txs(txs) -> Iterable[Optional[web3types.LogReceipt]]:
-    for _, receipt in txs:
-        yield from receipt.logs
+def decode_raw_logs_from_txs(txs) -> Iterable[DecodedTxLogs]:
+    for tx, receipt in txs:
+        yield DecodedTxLogs(
+            tx=tx,
+            raw_logs=receipt.logs,
+            decoded_logs=list(decode_events_from_raw_logs(tx.block, tx, receipt.logs)),
+        )
 
 
 def get_block_data(block_number: int, w3: Web3, chain: Chain):

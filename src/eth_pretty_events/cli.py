@@ -318,20 +318,16 @@ async def render_events(renv: RenderingEnv, input: str, outputs: Optional[List[s
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
         # It's a block number
         block, txs = decode_events.get_block_data(int(input), renv.w3, renv.chain)
-        events = decode_events.decode_events_from_block(block, txs)
-        raw_logs = decode_events.decode_raw_logs_from_txs(txs)
-        decoded_tx_logs = DecodedTxLogs(block.hash, raw_logs, list(events))
-        await _output_queue_event(decoded_tx_logs, output_queues)
+        for decoded_tx_logs in decode_events.decode_raw_logs_from_txs(txs):
+            await _output_queue_event(decoded_tx_logs, output_queues)
     elif input.replace("-", "").isdigit():
         if renv.w3 is None:
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
         block_from, block_to = input.split("-")
         for block_number in range(block_from, block_to + 1):
-            block, transactions = decode_events.get_block_data(int(block_number), renv.w3, renv.chain)
-            events = decode_events.decode_events_from_block(block, transactions)
-            raw_logs = decode_events.decode_raw_logs_from_txs(transactions)
-            decoded_tx_logs = DecodedTxLogs(block.hash, raw_logs, list(events))
-            await _output_queue_event(decoded_tx_logs, output_queues)
+            block, txs = decode_events.get_block_data(int(block_number), renv.w3, renv.chain)
+            for decoded_tx_logs in decode_events.decode_raw_logs_from_txs(txs):
+                await _output_queue_event(decoded_tx_logs, output_queues)
     else:
         raise argparse.ArgumentTypeError(f"Unknown input '{input}'")
 
