@@ -41,11 +41,26 @@ def decode_events_from_raw_logs(
     return (EventDefinition.read_log(log, block=block, tx=tx) for log in logs)
 
 
-def decode_events_from_block(block_number: int, w3: Web3, chain: Chain) -> Iterable[Optional[Event]]:
-    w3_block = w3.eth.get_block(block_number)
-    block = Block(chain=chain, number=block_number, timestamp=w3_block["timestamp"], hash=Hash(w3_block["hash"]))
-    for w3_tx in w3_block.transactions:
-        receipt = w3.eth.get_transaction_receipt(w3_tx)
-        tx = Tx(block=block, hash=Hash(receipt.transactionHash), index=receipt.transactionIndex)
+def decode_events_from_block(block, transactions) -> Iterable[Optional[Event]]:
+    for tx, receipt in transactions:
         for log in receipt.logs:
             yield EventDefinition.read_log(log, tx=tx, block=block)
+
+
+def decode_raw_logs_from_txs(txs) -> Iterable[Optional[web3types.LogReceipt]]:
+    for _, receipt in txs:
+        yield from receipt.logs
+
+
+def get_block_data(block_number: int, w3: Web3, chain: Chain):
+    w3_block = w3.eth.get_block(block_number)
+    block = Block(chain=chain, number=block_number, timestamp=w3_block["timestamp"], hash=Hash(w3_block["hash"]))
+
+    transactions = []
+    for w3_tx in w3_block.transactions:
+        tx_hash = Hash(w3_tx)
+        receipt = w3.eth.get_transaction_receipt(w3_tx)
+        tx = Tx(block=block, hash=tx_hash, index=receipt.transactionIndex)
+        transactions.append((tx, receipt))
+
+    return block, transactions
