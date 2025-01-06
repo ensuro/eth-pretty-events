@@ -36,6 +36,18 @@ class TemplateLoader:
 
 
 @pytest.fixture
+def renv(test_client):
+    renv = test_client.application.config["renv"]
+
+    class Args:
+        pass
+
+    renv.args = Args()
+
+    return renv
+
+
+@pytest.fixture
 def template_loader():
     return TemplateLoader()
 
@@ -133,10 +145,12 @@ def test_render_tx_endpoint(test_client):
     ]
 
 
-def test_alchemy_webhook_happy(test_client, discord_mock, caplog):
+def test_alchemy_webhook_happy(test_client, discord_mock, caplog, renv):
     caplog.set_level("INFO")
     with open("samples/alchemy-sample.json") as f:
         payload = f.read()
+
+    renv.args.on_error_template = "generic-event-on-error.md.j2"
 
     response = test_client.post(
         "/alchemy-webhook/",
@@ -189,10 +203,12 @@ def test_alchemy_webhook_invalid_signature(test_client, discord_mock):
     )
 
 
-def test_alchemy_webhook_with_failed_messages(test_client, discord_mock, caplog):
+def test_alchemy_webhook_with_failed_messages(test_client, discord_mock, caplog, renv):
     caplog.set_level("ERROR")
 
     discord_mock.return_value = MagicMock(status_code=404, content=b"Webhook not found")
+
+    renv.args.on_error_template = "generic-event-on-error.md.j2"
 
     with open("samples/alchemy-sample.json") as f:
         payload = f.read()

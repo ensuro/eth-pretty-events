@@ -304,7 +304,9 @@ async def render_events(renv: RenderingEnv, input: str, outputs: Optional[List[s
     """
     output_queues, output_workers = setup_outputs(renv)
     if input.endswith(".json"):
-        events = decode_events.decode_from_alchemy_input(json.load(open(input)), renv.chain)
+        decoded_tx_logs = decode_events.decode_logs_from_alchemy_input(json.load(open(input)), renv.chain)
+        for decoded_tx_log in decoded_tx_logs:
+            await _output_queue_event(decoded_tx_log, output_queues)
     elif input.startswith("0x") and len(input) == 66:
         if renv.w3 is None:
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")

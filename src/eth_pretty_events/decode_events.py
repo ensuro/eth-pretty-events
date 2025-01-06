@@ -24,6 +24,28 @@ def decode_from_alchemy_input(alchemy_input: dict, chain: Chain) -> Iterable[Opt
             yield parsed_log
 
 
+def decode_logs_from_alchemy_input(alchemy_input: dict, chain: Chain) -> Iterable[DecodedTxLogs]:
+    alchemy_block = alchemy_input["event"]["data"]["block"]
+    block = Block(
+        chain=chain,
+        number=alchemy_block["number"],
+        hash=Hash(alchemy_block["hash"]),
+        timestamp=alchemy_block["timestamp"],
+    )
+
+    for alchemy_log in alchemy_block["logs"]:
+        tx_data = alchemy_log["transaction"]
+        tx = Tx(
+            block=block,
+            hash=Hash(tx_data["hash"]),
+            index=tx_data["index"],
+        )
+        raw_logs = [graphql_log_to_log_receipt(alchemy_log, alchemy_block)]
+        decoded_logs = list(decode_events_from_raw_logs(block, tx, raw_logs))
+
+        yield DecodedTxLogs(tx=tx, raw_logs=raw_logs, decoded_logs=decoded_logs)
+
+
 def decode_events_from_tx(tx_hash: str, w3: Web3, chain: Chain) -> Iterable[Optional[Event]]:
     receipt = w3.eth.get_transaction_receipt(tx_hash)
     block = Block(
