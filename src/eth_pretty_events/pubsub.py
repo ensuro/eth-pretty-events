@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 from urllib.parse import ParseResult, parse_qs
@@ -12,8 +11,8 @@ _logger = logging.getLogger(__name__)
 
 
 class PubSubOutputBase(OutputBase):
-    def __init__(self, queue: asyncio.Queue, url: ParseResult, renv):
-        super().__init__(queue, url)
+    def __init__(self, url: ParseResult, renv):
+        super().__init__(url)
 
         query_params = parse_qs(url.query)
         self.dry_run = query_params.get("dry_run", ["false"])[0].lower() == "true"
@@ -32,7 +31,7 @@ class PubSubOutputBase(OutputBase):
             self.publisher = pubsub_v1.PublisherClient()
             self.topic_path = self.publisher.topic_path(self.project_id, self.topic)
 
-    async def publish_message(self, message):
+    def publish_message(self, message):
         formatted_message = json.dumps(message, cls=Web3JsonEncoder)
         publish = self.publisher.publish(self.topic_path, formatted_message.encode("utf-8"))
         message_id = publish.result()
@@ -41,7 +40,7 @@ class PubSubOutputBase(OutputBase):
 
 @OutputBase.register("pubsubrawlogs")
 class PubSubRawLogsOutput(PubSubOutputBase):
-    async def send_to_output(self, log: DecodedTxLogs):
+    def send_to_output_sync(self, log: DecodedTxLogs):
         message = {
             "transactionHash": log.tx.hash,
             "blockHash": log.tx.block.hash,
@@ -59,12 +58,12 @@ class PubSubRawLogsOutput(PubSubOutputBase):
                 for raw_log in log.raw_logs
             ],
         }
-        await self.publish_message(message)
+        self.publish_message(message)
 
 
 @OutputBase.register("pubsubdecodedlogs")
 class PubSubDecodedLogsOutput(PubSubOutputBase):
-    async def send_to_output(self, log: DecodedTxLogs):
+    def send_to_output_sync(self, log: DecodedTxLogs):
         message = {
             "transactionHash": log.tx.hash,
             "blockHash": log.tx.block.hash,
@@ -84,7 +83,7 @@ class PubSubDecodedLogsOutput(PubSubOutputBase):
                 if decoded_log
             ],
         }
-        await self.publish_message(message)
+        self.publish_message(message)
 
 
 class PrintToScreenPublisher:

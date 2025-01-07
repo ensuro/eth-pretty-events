@@ -11,14 +11,14 @@ _logger = logging.getLogger(__name__)
 
 @OutputBase.register("print")
 class PrintOutput(OutputBase):
-    def __init__(self, queue, url, renv):
-        super().__init__(queue, url)
+    def __init__(self, url, renv):
+        super().__init__(url)
         query_params = parse_qs(url.query)
         self.filename = query_params.get("file", [None])[0]
         self.output_file = open(self.filename, "w") if self.filename else sys.stdout
         self.renv = renv
 
-    async def send_to_output(self, log: DecodedTxLogs):
+    def send_to_output_sync(self, log: DecodedTxLogs):
         for event in log.decoded_logs:
             if event is None:
                 _logger.warning(f"Unrecognized event tried to be rendered in tx: {log.tx}.")

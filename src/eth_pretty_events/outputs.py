@@ -2,7 +2,7 @@ import asyncio
 import pprint
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Iterable, List, Optional
 from urllib.parse import ParseResult, urlparse
 
 from web3 import types as web3types
@@ -20,17 +20,24 @@ class DecodedTxLogs:
 class OutputBase(ABC):
     OUTPUT_REGISTRY = {}
 
-    def __init__(self, queue: asyncio.Queue[DecodedTxLogs], *args, **kwargs):
-        self.queue = queue
+    def __init__(self, *args, **kwargs):
+        pass
 
-    async def run(self):
+    def run_sync(self, logs: Iterable[DecodedTxLogs]):
+        for log in logs:
+            self.send_to_output_sync(log)
+
+    async def run(self, queue: asyncio.Queue[DecodedTxLogs]):
         while True:
-            log = await self.queue.get()
+            log = await queue.get()
             await self.send_to_output(log)
-            self.queue.task_done()
+            queue.task_done()
 
     @abstractmethod
-    async def send_to_output(self, log: DecodedTxLogs): ...
+    def send_to_output_sync(self, log: DecodedTxLogs): ...
+
+    async def send_to_output(self, log: DecodedTxLogs):
+        return self.send_to_output_sync(log)
 
     @classmethod
     def register(cls, type: str):
@@ -43,15 +50,15 @@ class OutputBase(ABC):
         return decorator
 
     @classmethod
-    def build_output(cls, queue: asyncio.Queue[DecodedTxLogs], output_url: str, renv):
+    def build_output(cls, output_url: str, renv):
         parsed_url: ParseResult = urlparse(output_url)
         if parsed_url.scheme not in cls.OUTPUT_REGISTRY:
             raise RuntimeError(f"Unsupported output type {parsed_url.scheme}")
         subclass = cls.OUTPUT_REGISTRY[parsed_url.scheme]
-        return subclass(queue, parsed_url, renv=renv)
+        return subclass(parsed_url, renv=renv)
 
 
 @OutputBase.register("dummy")
 class DummyOutput(OutputBase):
-    async def send_to_output(self, log: DecodedTxLogs):
+    def send_to_output_sync(self, log: DecodedTxLogs):
         pprint.pprint(log)

@@ -19,8 +19,8 @@ _logger = logging.getLogger(__name__)
 
 @OutputBase.register("discord")
 class DiscordOutput(OutputBase):
-    def __init__(self, queue: asyncio.Queue, url: ParseResult, renv):
-        super().__init__(queue, url)
+    def __init__(self, url: ParseResult, renv):
+        super().__init__(url)
         # Read the discord_url from an environment variable in the hostname
         query_params = parse_qs(url.query)
         if "from_env" in query_params:
@@ -33,25 +33,34 @@ class DiscordOutput(OutputBase):
         self.discord_url = discord_url
         self.renv = renv
 
-    async def run(self):
+    async def run(self, queue: asyncio.Queue[DecodedTxLogs]):
         async with aiohttp.ClientSession() as session:
-            self.session = session
-            await super().run()
-        delattr(self, "session")
+            session = session
+            while True:
+                log = await queue.get()
+                messages = build_transaction_messages(self.renv, log.tx, log.decoded_logs)
+                for message in messages:
+                    async with session.post(self.discord_url, json=message) as response:
+                        if response.status > 204:
+                            _logger.warning(f"Unexpected result {response.status}")
+                            _logger.warning("Discord response body: %s", await response.text())
+                queue.task_done()
 
-    async def send_to_output(self, log: DecodedTxLogs):
-        messages = build_transaction_messages(self.renv, log.tx, log.decoded_logs)
-        if messages is None:
-            return
+    def run_sync(self, logs: Iterable[DecodedTxLogs]):
+        session = requests.Session()
+        for log in logs:
+            messages = build_transaction_messages(self.renv, log.tx, log.decoded_logs)
+            for message in messages:
+                response = session.post(self.discord_url, json=message)
+                if response.status_code > 204:
+                    _logger.warning(f"Unexpected result {response.status_code}")
+                    _logger.warning("Discord response body: %s", response.content)
 
-        for message in messages:
-            async with self.session.post(self.discord_url, json=message) as response:
-                if response.status > 204:
-                    _logger.warning(f"Unexpected result {response.status}")
-                    _logger.warning("Discord response body: %s", await response.text())
+    def send_to_output_sync(self, log: DecodedTxLogs):
+        raise NotImplementedError()  # Shouldn't be called
 
 
-def build_transaction_messages(renv, tx, tx_events):
+def build_transaction_messages(renv, tx, tx_events) -> Iterable[dict]:
     current_batch = []
     current_batch_size = 0
 

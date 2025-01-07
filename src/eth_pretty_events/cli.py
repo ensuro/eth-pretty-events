@@ -4,7 +4,6 @@ import itertools
 import json
 import logging
 import os
-import signal
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
@@ -249,27 +248,23 @@ async def _websocket_loop(ws_url, do_stuff_fn):
             continue
 
 
-def setup_outputs(renv: RenderingEnv) -> Tuple[List[asyncio.Queue], List[asyncio.Task]]:
+def build_outputs(renv: RenderingEnv) -> List[OutputBase]:
     output_urls = renv.args.outputs or ["print://"]
+    return [OutputBase.build_output(output_url, renv) for output_url in output_urls]
+
+
+def setup_outputs(renv: RenderingEnv) -> Tuple[List[asyncio.Queue], List[asyncio.Task]]:
+    outputs = build_outputs(renv)
+
     output_queues = []
     workers = []
 
-    for output_url in output_urls:
+    for output in outputs:
         output_queue: asyncio.Queue[DecodedTxLogs] = asyncio.Queue()
-        output = OutputBase.build_output(output_queue, output_url, renv)
         output_queues.append(output_queue)
-        workers.append(asyncio.create_task(output.run()))
+        workers.append(asyncio.create_task(output.run(output_queue)))
 
-    async def cleanup_outputs():
-        _logger.info("Signal received, performing clean exit for outputs...")
-        for worker in workers:
-            worker.cancel()
-
-        await asyncio.gather(*workers, return_exceptions=True)
-
-        _logger.info("All output workers have stopped.")
-
-    return output_queues, workers, cleanup_outputs
+    return output_queues, workers
 
 
 async def listen_events(args):
@@ -294,71 +289,46 @@ async def listen_events(args):
     subscriptions = list(subscriptions)
 
     raw_logs = asyncio.Queue()
-    output_queues, output_workers, cleanup_outputs = setup_outputs(renv)
-
-    loop = asyncio.get_running_loop()
-    loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(cleanup_outputs()))
-    loop.add_signal_handler(signal.SIGINT, lambda: asyncio.create_task(cleanup_outputs()))
+    output_queues, output_workers = setup_outputs(renv)
 
     parse_worker = parse_raw_events(renv, raw_logs, output_queues)
     listen_worker = _websocket_loop(ws_url, lambda w3: _do_listen_events(w3, block_tree, renv, subscriptions, raw_logs))
-    try:
-        await asyncio.gather(listen_worker, parse_worker, *output_workers)
-    except asyncio.CancelledError:
-        _logger.info("Listen events exited cleanly.")
+    await asyncio.gather(listen_worker, parse_worker, *output_workers)
 
 
-async def _output_queue_event(decoded_logs, output_queues):
-    for output_queue in output_queues:
-        await output_queue.put(decoded_logs)
-
-
-async def render_events(renv: RenderingEnv, input: str, outputs: Optional[List[str]] = None):
+def render_events(renv: RenderingEnv, input: str):
     """Renders the events found in a given input
 
     Returns:
       int: Number of events found
     """
-    try:
-        output_queues, output_workers, cleanup_outputs = setup_outputs(renv)
+    outputs = build_outputs(renv)
 
-        loop = asyncio.get_running_loop()
-        loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(cleanup_outputs()))
-        loop.add_signal_handler(signal.SIGINT, lambda: asyncio.create_task(cleanup_outputs()))
+    if input.endswith(".json"):
+        decoded_tx_logs = decode_events.decode_from_alchemy_input(json.load(open(input)), renv.chain)
+    elif input.startswith("0x") and len(input) == 66:
+        if renv.w3 is None:
+            raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
+        # It's a transaction hash
+        decoded_tx_logs = [decode_events.decode_events_from_tx(input, renv.w3, renv.chain)]
+    elif input.isdigit():
+        if renv.w3 is None:
+            raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
+        # It's a block number
+        decoded_tx_logs = decode_events.decode_events_from_block(int(input), renv.w3, renv.chain)
+    elif input.replace("-", "").isdigit():
+        # It's a block range
+        if renv.w3 is None:
+            raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
+        block_from, block_to = input.split("-")
+        decoded_tx_logs = []
+        for block_number in range(int(block_from), int(block_to) + 1):
+            decoded_tx_logs.extend(decode_events.decode_events_from_block(block_number, renv.w3, renv.chain))
+    else:
+        raise argparse.ArgumentTypeError(f"Unknown input '{input}'")
 
-        if input.endswith(".json"):
-            decoded_tx_logs = decode_events.decode_logs_from_alchemy_input(json.load(open(input)), renv.chain)
-            for decoded_tx_log in decoded_tx_logs:
-                await _output_queue_event(decoded_tx_log, output_queues)
-        elif input.startswith("0x") and len(input) == 66:
-            if renv.w3 is None:
-                raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
-            # It's a transaction hash
-            receipt = renv.w3.eth.get_transaction_receipt(input)
-            events = decode_events.decode_events_from_tx(input, renv.w3, renv.chain)
-            decoded_tx_logs = DecodedTxLogs(input, receipt.logs, list(events))
-            await _output_queue_event(decoded_tx_logs, output_queues)
-        elif input.isdigit():
-            if renv.w3 is None:
-                raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
-            # It's a block number
-            block, txs = decode_events.get_block_data(int(input), renv.w3, renv.chain)
-            for decoded_tx_logs in decode_events.decode_raw_logs_from_txs(txs):
-                await _output_queue_event(decoded_tx_logs, output_queues)
-        elif input.replace("-", "").isdigit():
-            if renv.w3 is None:
-                raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
-            block_from, block_to = input.split("-")
-            for block_number in range(block_from, block_to + 1):
-                block, txs = decode_events.get_block_data(int(block_number), renv.w3, renv.chain)
-                for decoded_tx_logs in decode_events.decode_raw_logs_from_txs(txs):
-                    await _output_queue_event(decoded_tx_logs, output_queues)
-        else:
-            raise argparse.ArgumentTypeError(f"Unknown input '{input}'")
-
-        await asyncio.gather(*output_workers)
-    except asyncio.CancelledError:
-        _logger.info("Render events was exited corectly.")
+    for output in outputs:
+        output.run_sync(decoded_tx_logs)
 
 
 # ---- CLI ----
@@ -557,7 +527,7 @@ def main(args):
         print(f"{load_events(args)} events found")
     elif args.command == "render_events":
         renv = setup_rendering_env(args)
-        asyncio.run(render_events(renv, args.input, args.outputs))
+        render_events(renv, args.input)
     elif args.command == "listen_events":
         asyncio.run(listen_events(args))
     elif args.command in ("flask_dev", "flask_gunicorn"):
