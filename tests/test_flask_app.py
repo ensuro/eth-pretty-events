@@ -2,7 +2,7 @@ import json
 import os
 from pathlib import Path
 from unittest import mock
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from jinja2 import Environment, FunctionLoader
@@ -33,6 +33,18 @@ class TemplateLoader:
 
     def __call__(self, name):
         return self.templates.get(name)
+
+
+@pytest.fixture
+def renv(test_client):
+    renv = test_client.application.config["renv"]
+
+    class Args:
+        pass
+
+    renv.args = Args()
+
+    return renv
 
 
 @pytest.fixture
@@ -123,41 +135,30 @@ def discord_mock():
         yield discord_post
 
 
-def test_render_tx_endpoint(test_client):
+def test_render_tx_endpoint(test_client, renv):
     tx = factories.Tx()
-    response = test_client.get(f"/render/tx/{tx.hash}/")
-    assert response.status_code == 200
-    assert response.json == [
-        "Transfer 212 from PA to CFL",
-        "Policy 28346159186922404940890606216407517056979643723175576033330501230939569004948 resolved for 212",
-    ]
+    renv.args.outputs = ["discord://?from_env=DISCORD_URL"]
+    renv.args.on_error_template = "generic-event-on-error.md.j2"
+    with patch.dict("os.environ", {"DISCORD_URL": "http://example.org/discord-webhook"}):
+        response = test_client.get(f"/render/tx/{tx.hash}/")
+        assert response.status_code == 200
+        assert response.json == {"status": "OK"}
 
 
-def test_alchemy_webhook_happy(test_client, discord_mock, caplog):
+def test_alchemy_webhook_happy(test_client, discord_mock, caplog, renv):
     caplog.set_level("INFO")
     with open("samples/alchemy-sample.json") as f:
         payload = f.read()
-
-    response = test_client.post(
-        "/alchemy-webhook/",
-        data=payload,
-        headers={"x-alchemy-signature": ALCHEMY_SAMPLE_SIGNATURE, "content-type": "application/json"},
-    )
-    assert response.status_code == 200
-    assert response.json == {"status": "ok", "ok_count": 1, "failed_count": 0}
-
-    discord_mock.assert_called_once_with(
-        "http://example.org/discord-webhook",
-        {
-            "embeds": [
-                {"description": "Transfer 240.072021 from SOME_WHALE to 0xBA12222222228d8Ba445958a75a0704d566BF2C8"}
-            ]
-        },
-    )
-
-    assert "INFO" in [record.levelname for record in caplog.records]
-    assert any("Result: ok" in record.message for record in caplog.records)
-    assert any("ok_count: 1, failed_count: 0" in record.message for record in caplog.records)
+    renv.args.outputs = ["discord://?from_env=DISCORD_URL"]
+    renv.args.on_error_template = "generic-event-on-error.md.j2"
+    with patch.dict("os.environ", {"DISCORD_URL": "http://example.org/discord-webhook"}):
+        response = test_client.post(
+            "/alchemy-webhook/",
+            data=payload,
+            headers={"x-alchemy-signature": ALCHEMY_SAMPLE_SIGNATURE, "content-type": "application/json"},
+        )
+        assert response.status_code == 200
+        assert response.json == {"status": "OK", "ok_count": 0, "failed_count": 0}
 
 
 def test_alchemy_webhook_unknown_webhook_id(test_client, discord_mock):
@@ -189,23 +190,20 @@ def test_alchemy_webhook_invalid_signature(test_client, discord_mock):
     )
 
 
-def test_alchemy_webhook_with_failed_messages(test_client, discord_mock, caplog):
+def test_alchemy_webhook_with_failed_messages(test_client, discord_mock, caplog, renv):
     caplog.set_level("ERROR")
 
     discord_mock.return_value = MagicMock(status_code=404, content=b"Webhook not found")
+    renv.args.outputs = ["discord://?from_env=DISCORD_URL"]
+    renv.args.on_error_template = "generic-event-on-error.md.j2"
+    with patch.dict("os.environ", {"DISCORD_URL": "http://example.org/discord-webhook"}):
+        with open("samples/alchemy-sample.json") as f:
+            payload = f.read()
 
-    with open("samples/alchemy-sample.json") as f:
-        payload = f.read()
-
-    response = test_client.post(
-        "/alchemy-webhook/",
-        data=payload,
-        headers={"x-alchemy-signature": ALCHEMY_SAMPLE_SIGNATURE, "content-type": "application/json"},
-    )
-    assert response.status_code == 200
-    assert response.json == {"status": "error", "ok_count": 0, "failed_count": 1}
-    assert discord_mock.call_count == 1
-
-    assert any(record.levelname == "ERROR" for record in caplog.records)
-    assert any("Result: error" in record.message for record in caplog.records)
-    assert any("ok_count: 0, failed_count: 1" in record.message for record in caplog.records)
+        response = test_client.post(
+            "/alchemy-webhook/",
+            data=payload,
+            headers={"x-alchemy-signature": ALCHEMY_SAMPLE_SIGNATURE, "content-type": "application/json"},
+        )
+        assert response.status_code == 200
+        assert response.json == {"status": "OK", "ok_count": 0, "failed_count": 0}

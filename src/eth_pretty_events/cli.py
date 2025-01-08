@@ -7,7 +7,7 @@ import os
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Awaitable, List, Optional, Sequence, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 import jinja2
 import websockets
@@ -20,6 +20,7 @@ from web3.middleware import ExtraDataToPOAMiddleware
 from web3.providers.persistent import WebSocketProvider
 
 from . import discord  # noqa - To load the discord output
+from . import print_output  # noqa - To load the print output
 
 try:
     from . import pubsub  # noqa - To load the pubsub output
@@ -27,7 +28,7 @@ except ImportError:
     pass
 from . import __version__, address_book, decode_events, render
 from .block_tree import BlockTree
-from .event_filter import TemplateRule, find_template, read_template_rules
+from .event_filter import TemplateRule, read_template_rules
 from .event_parser import EventDefinition
 from .event_subscriptions import load_subscriptions
 from .outputs import DecodedTxLogs, OutputBase
@@ -202,11 +203,13 @@ async def _do_listen_events(
                     for pl in payloads:
                         print(json.dumps(pl, cls=Web3JsonEncoder, indent=2))
                 else:  # confirmations >= renv.args.n_confirmations:
+                    if block.timestamp is None:
+                        block.timestamp = timestamp_cache[block.hash]
                     await raw_logs.put((block, [pl["result"] for pl in payloads]))
         else:
             raw_log: web3types.LogReceipt = payload["result"]
             block_hash = Hash(raw_log["blockHash"])
-            timestamp = timestamp_cache[block_hash]  # Assumes the block was received previously
+            timestamp = timestamp_cache.get(block_hash, None)
             block = Block(block_hash, timestamp, raw_log["blockNumber"], renv.chain)
             waitlist_logs[block].append(payload)
 
@@ -245,14 +248,21 @@ async def _websocket_loop(ws_url, do_stuff_fn):
             continue
 
 
-def setup_outputs(renv: RenderingEnv) -> Tuple[List[asyncio.Queue], List[Awaitable]]:
+def build_outputs(renv: RenderingEnv) -> List[OutputBase]:
+    output_urls = renv.args.outputs or ["print://"]
+    return [OutputBase.build_output(output_url, renv) for output_url in output_urls]
+
+
+def setup_outputs(renv: RenderingEnv) -> Tuple[List[asyncio.Queue], List[asyncio.Task]]:
+    outputs = build_outputs(renv)
+
     output_queues = []
     workers = []
-    for output_url in renv.args.outputs:
+
+    for output in outputs:
         output_queue: asyncio.Queue[DecodedTxLogs] = asyncio.Queue()
-        output = OutputBase.build_output(output_queue, output_url, renv)
         output_queues.append(output_queue)
-        workers.append(output.run())
+        workers.append(output.run(output_queue))
 
     return output_queues, workers
 
@@ -292,38 +302,33 @@ def render_events(renv: RenderingEnv, input: str):
     Returns:
       int: Number of events found
     """
+    outputs = build_outputs(renv)
 
     if input.endswith(".json"):
-        events = decode_events.decode_from_alchemy_input(json.load(open(input)), renv.chain)
+        decoded_tx_logs = decode_events.decode_from_alchemy_input(json.load(open(input)), renv.chain)
     elif input.startswith("0x") and len(input) == 66:
         if renv.w3 is None:
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
         # It's a transaction hash
-        events = decode_events.decode_events_from_tx(input, renv.w3, renv.chain)
+        decoded_tx_logs = [decode_events.decode_events_from_tx(input, renv.w3, renv.chain)]
     elif input.isdigit():
         if renv.w3 is None:
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
         # It's a block number
-        events = decode_events.decode_events_from_block(int(input), renv.w3, renv.chain)
+        decoded_tx_logs = decode_events.decode_events_from_block(int(input), renv.w3, renv.chain)
     elif input.replace("-", "").isdigit():
+        # It's a block range
         if renv.w3 is None:
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
         block_from, block_to = input.split("-")
-        blocks = range(int(block_from), int(block_to) + 1)
-        events = itertools.chain.from_iterable(
-            decode_events.decode_events_from_block(block, renv.w3, renv.chain) for block in blocks
-        )
+        decoded_tx_logs = []
+        for block_number in range(int(block_from), int(block_to) + 1):
+            decoded_tx_logs.extend(decode_events.decode_events_from_block(block_number, renv.w3, renv.chain))
     else:
         raise argparse.ArgumentTypeError(f"Unknown input '{input}'")
 
-    for event in events:
-        if not event:
-            continue
-        template_name = find_template(renv.template_rules, event)
-        if template_name is None:
-            continue
-        print(render.render(renv.jinja_env, event, template_name))
-        print("--------------------------")
+    for output in outputs:
+        output.run_sync(decoded_tx_logs)
 
 
 # ---- CLI ----
@@ -434,6 +439,13 @@ def parse_args(args):
         default=os.environ.get("DISCORD_URL"),
     )
 
+    parser.add_argument(
+        "--on-error-template",
+        type=str,
+        help="URL to send discord messages",
+        default=os.environ.get("ON_ERROR_TEMPLATE"),
+    )
+
     subparsers = parser.add_subparsers(dest="command", required=True, help="sub-command to run")
 
     load_events = subparsers.add_parser("load_events")
@@ -446,6 +458,13 @@ def parse_args(args):
         metavar="<alchemy-input-json|txhash>",
         type=str,
         help="Alchemy JSON file or TX Transaction",
+    )
+
+    render_events.add_argument(
+        "outputs",
+        type=str,
+        nargs="*",
+        help="A list of strings with the different outputs where the logs will be sent",
     )
 
     flask_dev = subparsers.add_parser("flask_dev")
