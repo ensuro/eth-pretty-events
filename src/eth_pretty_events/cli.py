@@ -262,7 +262,7 @@ def setup_outputs(renv: RenderingEnv) -> Tuple[List[asyncio.Queue], List[asyncio
     for output in outputs:
         output_queue: asyncio.Queue[DecodedTxLogs] = asyncio.Queue()
         output_queues.append(output_queue)
-        workers.append(asyncio.create_task(output.run(output_queue)))
+        workers.append(output.run(output_queue))
 
     return output_queues, workers
 
