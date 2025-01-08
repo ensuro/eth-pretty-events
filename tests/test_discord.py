@@ -131,21 +131,21 @@ async def setup_output(aiohttp_client, dummy_renv, template_rules, template_load
     queue = asyncio.Queue()
     url = "discord://?from_env=DISCORD_URL"
     with patch.dict("os.environ", {"DISCORD_URL": str(webhook_url)}):
-        output = DiscordOutput(queue, urlparse(url), dummy_renv)
+        output = DiscordOutput(urlparse(url), dummy_renv)
 
     return output, queue, app
 
 
-def test_discord_output_missing_env_var(dummy_queue, dummy_renv):
+def test_discord_output_missing_env_var(dummy_renv):
     url = urlparse("discord://localhost")
     with pytest.raises(RuntimeError, match="Must define the Discord URL in DISCORD_URL env variable"):
-        DiscordOutput(dummy_queue, url, dummy_renv)
+        DiscordOutput(url, dummy_renv)
 
 
-def test_discord_output_with_env_var(dummy_queue, dummy_renv):
+def test_discord_output_with_env_var(dummy_renv):
     with patch.dict("os.environ", {"DISCORD_URL": "https://discord.com/api/webhooks/test"}):
         url = urlparse("discord://localhost")
-        output = DiscordOutput(dummy_queue, url, dummy_renv)
+        output = DiscordOutput(url, dummy_renv)
         assert output.discord_url == "https://discord.com/api/webhooks/test"
 
 
@@ -177,12 +177,12 @@ def test_build_and_send_messages(dummy_renv, template_rules, template_loader, mo
 
 
 @pytest.mark.asyncio
-async def test_send_to_output_webhook_response(setup_output, alchemy_sample_events, mock_tx):
+async def test_run_webhook_response(setup_output, alchemy_sample_events, mock_tx):
     output, queue, app = await setup_output
 
     decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[], decoded_logs=alchemy_sample_events)
 
-    task = asyncio.create_task(output.run())
+    task = asyncio.create_task(output.run(queue))
     await queue.put(decoded_logs)
     await asyncio.sleep(1)
 
@@ -196,8 +196,27 @@ async def test_send_to_output_webhook_response(setup_output, alchemy_sample_even
     assert len(payload["embeds"]) > 0
 
 
+def test_run_sync_with_valid_messages(dummy_renv, template_rules, template_loader, alchemy_sample_events, mock_tx):
+    dummy_renv.template_rules = template_rules
+    dummy_renv.jinja_env = Environment(loader=FunctionLoader(template_loader))
+    add_filters(dummy_renv.jinja_env)
+    url = "discord://?from_env=DISCORD_URL"
+    with patch("requests.Session.post", return_value=MagicMock(status_code=200)) as mock_post:
+
+        with patch.dict("os.environ", {"DISCORD_URL": "https://discord.com/api/webhooks/test"}):
+            output = DiscordOutput(urlparse(url), dummy_renv)
+
+            decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[], decoded_logs=alchemy_sample_events)
+
+            output.run_sync([decoded_logs])
+
+            assert mock_post.call_count == len(
+                list(build_transaction_messages(dummy_renv, mock_tx, alchemy_sample_events))
+            )
+
+
 @pytest.mark.asyncio
-async def test_send_to_output_warning_logs(
+async def test_run_warning_logs(
     aiohttp_client, dummy_renv, template_rules, template_loader, alchemy_sample_events, mock_tx, caplog
 ):
     dummy_renv.template_rules = template_rules
@@ -217,12 +236,12 @@ async def test_send_to_output_warning_logs(
     queue = asyncio.Queue()
     url = "discord://?from_env=DISCORD_URL"
     with patch.dict("os.environ", {"DISCORD_URL": str(webhook_url)}):
-        output = DiscordOutput(queue, urlparse(url), dummy_renv)
+        output = DiscordOutput(urlparse(url), dummy_renv)
 
     decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[], decoded_logs=alchemy_sample_events)
 
     with caplog.at_level("WARNING"):
-        task = asyncio.create_task(output.run())
+        task = asyncio.create_task(output.run(queue))
         await queue.put(decoded_logs)
         await asyncio.sleep(1)
 
@@ -234,6 +253,27 @@ async def test_send_to_output_warning_logs(
     assert "Discord response body: Internal Server Error" in caplog.text
 
 
+def test_run_sync_with_warning_logs(
+    dummy_renv, template_rules, template_loader, alchemy_sample_events, mock_tx, caplog
+):
+    dummy_renv.template_rules = template_rules
+    dummy_renv.jinja_env = Environment(loader=FunctionLoader(template_loader))
+    add_filters(dummy_renv.jinja_env)
+    url = "discord://?from_env=DISCORD_URL"
+    with patch("requests.Session.post", return_value=MagicMock(status_code=500, content=b"Internal Server Error")):
+
+        with patch.dict("os.environ", {"DISCORD_URL": "https://discord.com/api/webhooks/test"}):
+            output = DiscordOutput(urlparse(url), dummy_renv)
+
+            decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[], decoded_logs=alchemy_sample_events)
+
+            with caplog.at_level("WARNING"):
+                output.run_sync([decoded_logs])
+
+            assert "Unexpected result 500" in caplog.text
+            assert "Discord response body: Internal Server Error" in caplog.text
+
+
 def test_build_transaction_messages_none_events(dummy_renv, mock_tx):
     dummy_renv.template_rules = []
     events = [None, Event(tx=mock_tx, address="0x0", args={}, name="TestEvent", log_index=0)]
@@ -242,17 +282,14 @@ def test_build_transaction_messages_none_events(dummy_renv, mock_tx):
 
 
 @pytest.mark.asyncio
-async def test_send_to_output_none_messages(setup_output, mock_tx):
+async def test_send_to_output_sync_not_implemented(setup_output, mock_tx):
     output, queue, _ = await setup_output
 
-    with patch("eth_pretty_events.discord.build_transaction_messages", return_value=None) as mock_build_messages:
-        decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[], decoded_logs=[])
+    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[], decoded_logs=[])
 
-        await queue.put(decoded_logs)
-
-        await output.send_to_output(decoded_logs)
-
-        mock_build_messages.assert_called_once_with(output.renv, mock_tx, [])
+    await queue.put(decoded_logs)
+    with pytest.raises(NotImplementedError):
+        await output.send_to_output_sync(decoded_logs)
 
 
 def test_build_and_send_messages_none_messages(dummy_renv, mock_tx, alchemy_sample_events):

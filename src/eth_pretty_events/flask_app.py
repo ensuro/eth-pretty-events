@@ -86,7 +86,7 @@ def render_tx(tx_hash: str):
 
     decoded_logs = decode_events_from_tx(hash, renv.w3, renv.chain)
     outputs = build_outputs(renv)
-    send_to_outputs(outputs, decoded_logs)
+    send_to_outputs(outputs, [decoded_logs])
     return {"status": "OK"}
 
 

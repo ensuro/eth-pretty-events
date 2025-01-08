@@ -54,7 +54,7 @@ class DiscordOutput(OutputBase):
                 response = session.post(self.discord_url, json=message)
                 if response.status_code > 204:
                     _logger.warning(f"Unexpected result {response.status_code}")
-                    _logger.warning("Discord response body: %s", response.content)
+                    _logger.warning("Discord response body: %s", response.content.decode("utf-8"))
 
     def send_to_output_sync(self, log: DecodedTxLogs):
         raise NotImplementedError()  # Shouldn't be called

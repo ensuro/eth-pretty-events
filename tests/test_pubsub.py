@@ -33,29 +33,29 @@ def dummy_renv():
     return MagicMock()
 
 
-def test_pubsub_output_base_missing_project_id_or_topic(dummy_queue, dummy_renv):
+def test_pubsub_output_base_missing_project_id_or_topic(dummy_renv):
     url_without_project_id = urlparse("pubsubrawlogs://?topic=test_topic")
     with pytest.raises(RuntimeError, match="Both 'project_id' and 'topic' must be specified in the query string"):
-        PubSubRawLogsOutput(dummy_queue, url_without_project_id, dummy_renv)
+        PubSubRawLogsOutput(url_without_project_id, dummy_renv)
     with pytest.raises(RuntimeError, match="Both 'project_id' and 'topic' must be specified in the query string"):
-        PubSubDecodedLogsOutput(dummy_queue, url_without_project_id, dummy_renv)
+        PubSubDecodedLogsOutput(url_without_project_id, dummy_renv)
 
     url_without_topic = urlparse("pubsubrawlogs://?project_id=test_project")
     with pytest.raises(RuntimeError, match="Both 'project_id' and 'topic' must be specified in the query string"):
-        PubSubRawLogsOutput(dummy_queue, url_without_topic, dummy_renv)
+        PubSubRawLogsOutput(url_without_topic, dummy_renv)
     with pytest.raises(RuntimeError, match="Both 'project_id' and 'topic' must be specified in the query string"):
-        PubSubDecodedLogsOutput(dummy_queue, url_without_topic, dummy_renv)
+        PubSubDecodedLogsOutput(url_without_topic, dummy_renv)
 
     url_without_both = urlparse("pubsubrawlogs://")
     with pytest.raises(RuntimeError, match="Both 'project_id' and 'topic' must be specified in the query string"):
-        PubSubRawLogsOutput(dummy_queue, url_without_both, dummy_renv)
+        PubSubRawLogsOutput(url_without_both, dummy_renv)
     with pytest.raises(RuntimeError, match="Both 'project_id' and 'topic' must be specified in the query string"):
-        PubSubDecodedLogsOutput(dummy_queue, url_without_both, dummy_renv)
+        PubSubDecodedLogsOutput(url_without_both, dummy_renv)
 
 
-def test_pubsub_raw_logs_output_with_dry_run(dummy_queue, dummy_renv, caplog):
+def test_pubsub_raw_logs_output_with_dry_run(dummy_renv, caplog):
     url = urlparse("pubsubrawlogs://?project_id=test_project&topic=test_topic&dry_run=true")
-    output = PubSubRawLogsOutput(dummy_queue, url, dummy_renv)
+    output = PubSubRawLogsOutput(url, dummy_renv)
 
     assert output.dry_run is True
     assert output.project_id == "test_project"
@@ -105,14 +105,14 @@ def test_pubsub_raw_logs_output_with_dry_run(dummy_queue, dummy_renv, caplog):
     assert json.dumps(expected_message, indent=2) in caplog.text
 
 
-def test_pubsub_raw_logs_output_production(dummy_queue, dummy_renv, mock_future):
+def test_pubsub_raw_logs_output_production(dummy_renv, mock_future):
     url = urlparse("pubsubrawlogs://?project_id=test_project&topic=test_topic&dry_run=false")
 
     with patch("eth_pretty_events.pubsub.pubsub_v1.PublisherClient") as mock_publisher:
         mock_publisher_instance = mock_publisher.return_value
         mock_publisher_instance.topic_path.return_value = "projects/test_project/topics/test_topic"
 
-        output = PubSubRawLogsOutput(dummy_queue, url, dummy_renv)
+        output = PubSubRawLogsOutput(url, dummy_renv)
 
         assert output.dry_run is False
         assert output.project_id == "test_project"
@@ -165,9 +165,9 @@ def test_pubsub_raw_logs_output_production(dummy_queue, dummy_renv, mock_future)
         )
 
 
-def test_pubsub_decoded_logs_output_with_dry_run(dummy_queue, dummy_renv, caplog):
+def test_pubsub_decoded_logs_output_with_dry_run(dummy_renv, caplog):
     url = urlparse("pubsubdecodedlogs://?project_id=test_project&topic=test_topic&dry_run=true")
-    output = PubSubDecodedLogsOutput(dummy_queue, url, dummy_renv)
+    output = PubSubDecodedLogsOutput(url, dummy_renv)
 
     assert output.dry_run is True
     assert output.project_id == "test_project"
@@ -237,14 +237,14 @@ def test_pubsub_decoded_logs_output_with_dry_run(dummy_queue, dummy_renv, caplog
         assert json.dumps(expected_message, indent=2) in caplog.text
 
 
-def test_pubsub_decoded_logs_output_production(dummy_queue, dummy_renv, mock_future):
+def test_pubsub_decoded_logs_output_production(dummy_renv, mock_future):
     url = urlparse("pubsubdecodedlogs://?project_id=test_project&topic=test_topic&dry_run=false")
 
     with patch("eth_pretty_events.pubsub.pubsub_v1.PublisherClient") as mock_publisher:
         mock_publisher_instance = mock_publisher.return_value
         mock_publisher_instance.topic_path.return_value = "projects/test_project/topics/test_topic"
 
-        output = PubSubDecodedLogsOutput(dummy_queue, url, dummy_renv)
+        output = PubSubDecodedLogsOutput(url, dummy_renv)
 
         assert output.dry_run is False
         assert output.project_id == "test_project"
