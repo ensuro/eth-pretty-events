@@ -471,12 +471,26 @@ def parse_args(args):
     flask_dev.add_argument("--port", type=int, help="Port to start flask dev server", default=8000)
     flask_dev.add_argument("--host", type=str, help="Host to start flask dev server", default=None)
 
+    flask_dev.add_argument(
+        "outputs",
+        type=str,
+        nargs="*",
+        help="A list of strings with the different outputs where the logs will be sent",
+    )
+
     flask_gunicorn = subparsers.add_parser("flask_gunicorn")
     flask_gunicorn.add_argument(
         "--rollbar-token", type=str, help="Token to send errors to rollbar", default=os.environ.get("ROLLBAR_TOKEN")
     )
     flask_gunicorn.add_argument(
         "--rollbar-env", type=str, help="Name of the rollbar environment", default=os.environ.get("ROLLBAR_ENVIRONMENT")
+    )
+
+    flask_gunicorn.add_argument(
+        "outputs",
+        type=str,
+        nargs="*",
+        help="A list of strings with the different outputs where the logs will be sent",
     )
 
     listen_events = subparsers.add_parser("listen_events")
