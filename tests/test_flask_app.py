@@ -1,7 +1,6 @@
 import json
 import os
 from pathlib import Path
-from unittest import mock
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -128,13 +127,6 @@ def address_book():
     )
 
 
-@pytest.fixture
-def discord_mock():
-    with mock.patch("eth_pretty_events.discord.post") as discord_post:
-        discord_post.return_value = MagicMock(status_code=200)
-        yield discord_post
-
-
 def test_render_tx_endpoint(test_client, renv):
     tx = factories.Tx()
     renv.args.outputs = ["discord://?from_env=DISCORD_URL"]
@@ -142,11 +134,10 @@ def test_render_tx_endpoint(test_client, renv):
     with patch.dict("os.environ", {"DISCORD_URL": "http://example.org/discord-webhook"}):
         response = test_client.get(f"/render/tx/{tx.hash}/")
         assert response.status_code == 200
-        assert response.json == {"status": "OK"}
+        assert response.json == {"status": "OK", "ok_count": 1, "failed_count": 0}
 
 
-def test_alchemy_webhook_happy(test_client, discord_mock, caplog, renv):
-    caplog.set_level("INFO")
+def test_alchemy_webhook_happy(test_client, renv):
     with open("samples/alchemy-sample.json") as f:
         payload = f.read()
     renv.args.outputs = ["discord://?from_env=DISCORD_URL"]
@@ -158,10 +149,10 @@ def test_alchemy_webhook_happy(test_client, discord_mock, caplog, renv):
             headers={"x-alchemy-signature": ALCHEMY_SAMPLE_SIGNATURE, "content-type": "application/json"},
         )
         assert response.status_code == 200
-        assert response.json == {"status": "OK", "ok_count": 0, "failed_count": 0}
+        assert response.json == {"status": "OK", "ok_count": 1, "failed_count": 0}
 
 
-def test_alchemy_webhook_unknown_webhook_id(test_client, discord_mock):
+def test_alchemy_webhook_unknown_webhook_id(test_client):
 
     response = test_client.post(
         "/alchemy-webhook/",
@@ -172,7 +163,7 @@ def test_alchemy_webhook_unknown_webhook_id(test_client, discord_mock):
     assert response.json == {}
 
 
-def test_alchemy_webhook_invalid_signature(test_client, discord_mock):
+def test_alchemy_webhook_invalid_signature(test_client):
     with open("samples/alchemy-sample.json") as f:
         payload = f.read()
 
@@ -190,20 +181,16 @@ def test_alchemy_webhook_invalid_signature(test_client, discord_mock):
     )
 
 
-def test_alchemy_webhook_with_failed_messages(test_client, discord_mock, caplog, renv):
-    caplog.set_level("ERROR")
+def test_alchemy_webhook_with_failed_messages(test_client, renv):
+    with open("samples/alchemy-sample.json") as f:
+        payload = f.read()
 
-    discord_mock.return_value = MagicMock(status_code=404, content=b"Webhook not found")
     renv.args.outputs = ["discord://?from_env=DISCORD_URL"]
-    renv.args.on_error_template = "generic-event-on-error.md.j2"
     with patch.dict("os.environ", {"DISCORD_URL": "http://example.org/discord-webhook"}):
-        with open("samples/alchemy-sample.json") as f:
-            payload = f.read()
-
         response = test_client.post(
             "/alchemy-webhook/",
             data=payload,
             headers={"x-alchemy-signature": ALCHEMY_SAMPLE_SIGNATURE, "content-type": "application/json"},
         )
         assert response.status_code == 200
-        assert response.json == {"status": "OK", "ok_count": 0, "failed_count": 0}
+        assert response.json == {"status": "OK", "ok_count": 0, "failed_count": 1}

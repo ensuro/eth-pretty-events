@@ -21,9 +21,14 @@ class PrintOutput(OutputBase):
     def send_to_output_sync(self, log: DecodedTxLogs):
         for event in log.decoded_logs:
             if event is None:
-                _logger.warning(f"Unrecognized event tried to be rendered in tx: {log.tx}.")
+                _logger.warning(
+                    f"Unrecognized event tried to be rendered in tx: {log.tx.hash}, "
+                    f"index: {log.tx.index}, block: {log.tx.block.number}"
+                )
                 return
             template_name = find_template(self.renv.template_rules, event)
+            if template_name is None:
+                continue
             rendered_event = render(self.renv.jinja_env, event, [template_name, self.renv.args.on_error_template])
 
             print(rendered_event, file=self.output_file)

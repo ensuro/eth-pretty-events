@@ -46,8 +46,18 @@ def build_outputs(renv) -> List[OutputBase]:
 
 
 def send_to_outputs(outputs, decoded_tx_logs):
+    ok_count = 0
+    failed_count = 0
+
     for output in outputs:
-        output.run_sync(decoded_tx_logs)
+        try:
+            output.run_sync(decoded_tx_logs)
+            ok_count += 1
+        except Exception:
+            app.logger.error(f"Failed to send logs to output {output}")
+            failed_count += 1
+
+    return ok_count, failed_count
 
 
 @app.route("/alchemy-webhook/", methods=["POST"])
@@ -73,9 +83,9 @@ def alchemy_webhook():
 
     decoded_logs = decode_from_alchemy_input(payload, renv.chain)
     outputs = build_outputs(renv)
-    send_to_outputs(outputs, decoded_logs)
+    ok_count, failed_count = send_to_outputs(outputs, decoded_logs)
     # TODO: do we want to fail if any of the messages fails? Probably not as it will cause a flood of repeated messages
-    return {"status": "OK", "ok_count": 0, "failed_count": 0}
+    return {"status": "OK", "ok_count": ok_count, "failed_count": failed_count}
 
 
 @app.route("/render/tx/<tx_hash>/", methods=["GET"])
@@ -86,8 +96,8 @@ def render_tx(tx_hash: str):
 
     decoded_logs = decode_events_from_tx(hash, renv.w3, renv.chain)
     outputs = build_outputs(renv)
-    send_to_outputs(outputs, [decoded_logs])
-    return {"status": "OK"}
+    ok_count, failed_count = send_to_outputs(outputs, [decoded_logs])
+    return {"status": "OK", "ok_count": ok_count, "failed_count": failed_count}
 
 
 if __name__ == "__main__":
