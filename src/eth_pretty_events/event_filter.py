@@ -1,4 +1,5 @@
 import operator
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -8,7 +9,7 @@ from typing import Any, Optional
 from eth_utils import keccak
 
 from eth_pretty_events.address_book import get_default as get_addr_book
-from eth_pretty_events.types import Address, Event
+from eth_pretty_events.types import Address, Event, Hash
 
 
 class EventFilter(ABC):
@@ -86,6 +87,21 @@ def transform_address(val: str) -> Address:
     return address
 
 
+def get_topic0(event_string: str) -> str:
+    # Remove parameter names
+    normalized = re.sub(r"(indexed\s+)?([a-zA-Z0-9\[\]]+)\s+[a-zA-Z0-9_]+(?=[,)])", r"\2", event_string)
+
+    # Remove whitespace
+    normalized = re.sub(r"\s+", "", normalized)
+
+    # WARNING: doesn't work with struct arguments unless normalized
+    # get_topic0("NewPolicy(address, (uint256, uint256, uint256, uint256, uint256, uint256,
+    #                                 uint256, uint256, uint256, uint256, uint256, address, uint40, uint40)
+    #                      )") == "0x38f420e3792044ba61536a1f83956eefc878b3fb09a7d4a28790f05b6a3eaf3b"
+
+    return transform_keccak(normalized)
+
+
 TRANSFORMS = {
     "amount": transform_amount,
     "wad": transform_wad,
@@ -125,6 +141,21 @@ class NameEventFilter(EventFilter):
 
     def filter(self, evt: Event) -> bool:
         return evt.name == self.value
+
+
+@EventFilter.register("topic")
+class TopicEventFilter(EventFilter):
+    value: Hash
+
+    def __init__(self, value: str):
+        try:
+            self.value = Hash(value)
+        except ValueError:
+            # The value is
+            self.value = Hash(get_topic0(value))
+
+    def filter(self, evt: Event) -> bool:
+        return evt.topic == self.value
 
 
 @EventFilter.register("arg")
