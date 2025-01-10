@@ -16,6 +16,7 @@ from typing import (
 )
 
 from eth_typing import ABIComponent
+from eth_utils.abi import event_abi_to_log_topic
 from eth_utils.address import is_checksum_address, to_checksum_address
 from hexbytes import HexBytes
 from web3.types import EventData
@@ -112,6 +113,10 @@ class Event:
             tx=tx,
             name=evt["event"],
         )
+
+    @property
+    def topic(self) -> Hash:
+        return Hash(event_abi_to_log_topic({"inputs": self.args._components, "name": self.name, "type": "event"}))
 
 
 INT_TYPE_REGEX = re.compile(r"int\d+|uint\d+")

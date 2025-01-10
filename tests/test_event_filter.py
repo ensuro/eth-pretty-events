@@ -253,3 +253,29 @@ def test_true_event_filter():
 
     assert true_filter.filter(event1)
     assert true_filter.filter(event2)
+
+
+def test_get_topic0_with_event():
+    event_string = "Transfer(address from, address to, uint256 value)"
+    topic_filter = event_filter.TopicEventFilter(event_string)
+
+    event = factories.Event(name="Transfer")
+    non_matching_event = factories.Event(name="NewPolicy")
+
+    assert topic_filter.filter(event)
+    assert not topic_filter.filter(non_matching_event)
+
+
+def test_get_topic0_with_event_whitespaces():
+    event_string = "Transfer(address   from,   address   to, uint256   value)"
+    topic_filter = event_filter.TopicEventFilter(event_string)
+
+    event = factories.Event(name="Transfer")
+
+    assert topic_filter.filter(event)
+
+
+def test_get_topic0_with_hash():
+    event_string = "Transfer(address from, address to, uint256 value)"
+    expected_topic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+    assert event_filter.get_topic0(event_string) == expected_topic
