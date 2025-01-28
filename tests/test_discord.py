@@ -154,7 +154,8 @@ def test_build_transaction_messages_limits(dummy_renv, template_rules, template_
     dummy_renv.jinja_env = Environment(loader=FunctionLoader(template_loader))
     add_filters(dummy_renv.jinja_env)
 
-    messages = list(build_transaction_messages(dummy_renv, mock_tx, alchemy_sample_events))
+    tx_raw_logs = [{} for _ in alchemy_sample_events]
+    messages = list(build_transaction_messages(dummy_renv, mock_tx, alchemy_sample_events, tx_raw_logs))
 
     assert len(messages) >= 1
     assert all(len(message["embeds"]) <= 9 for message in messages)
@@ -179,8 +180,8 @@ def test_build_and_send_messages(dummy_renv, template_rules, template_loader, mo
 @pytest.mark.asyncio
 async def test_run_webhook_response(setup_output, alchemy_sample_events, mock_tx):
     output, queue, app = await setup_output
-
-    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[], decoded_logs=alchemy_sample_events)
+    raw_logs = [{"logIndex": event.log_index} for event in alchemy_sample_events]
+    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs, decoded_logs=alchemy_sample_events)
 
     task = asyncio.create_task(output.run(queue))
     await queue.put(decoded_logs)
@@ -211,7 +212,7 @@ def test_run_sync_with_valid_messages(dummy_renv, template_rules, template_loade
             output.run_sync([decoded_logs])
 
             assert mock_post.call_count == len(
-                list(build_transaction_messages(dummy_renv, mock_tx, alchemy_sample_events))
+                list(build_transaction_messages(dummy_renv, mock_tx, alchemy_sample_events, tx_raw_logs=[]))
             )
 
 
@@ -237,8 +238,8 @@ async def test_run_warning_logs(
     url = "discord://?from_env=DISCORD_URL"
     with patch.dict("os.environ", {"DISCORD_URL": str(webhook_url)}):
         output = DiscordOutput(urlparse(url), dummy_renv)
-
-    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[], decoded_logs=alchemy_sample_events)
+    raw_logs = [{"logIndex": event.log_index} for event in alchemy_sample_events]
+    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs, decoded_logs=alchemy_sample_events)
 
     with caplog.at_level("WARNING"):
         task = asyncio.create_task(output.run(queue))
@@ -264,8 +265,8 @@ def test_run_sync_with_warning_logs(
 
         with patch.dict("os.environ", {"DISCORD_URL": "https://discord.com/api/webhooks/test"}):
             output = DiscordOutput(urlparse(url), dummy_renv)
-
-            decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[], decoded_logs=alchemy_sample_events)
+            raw_logs = [{"logIndex": event.log_index} for event in alchemy_sample_events]
+            decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs, decoded_logs=alchemy_sample_events)
 
             with caplog.at_level("WARNING"):
                 output.run_sync([decoded_logs])
@@ -277,7 +278,7 @@ def test_run_sync_with_warning_logs(
 def test_build_transaction_messages_none_events(dummy_renv, mock_tx):
     dummy_renv.template_rules = []
     events = [None, Event(tx=mock_tx, address="0x0", args={}, name="TestEvent", log_index=0)]
-    messages = list(build_transaction_messages(dummy_renv, mock_tx, events))
+    messages = list(build_transaction_messages(dummy_renv, mock_tx, events, tx_raw_logs=[]))
     assert len(messages) == 0
 
 
@@ -295,7 +296,7 @@ async def test_send_to_output_sync_not_implemented(setup_output, mock_tx):
 def test_build_and_send_messages_none_messages(dummy_renv, mock_tx, alchemy_sample_events):
     with patch(
         "eth_pretty_events.discord.build_transaction_messages",
-        side_effect=lambda renv, tx, tx_events: (
+        side_effect=lambda renv, tx, tx_events, tx_raw_logs: (
             [None, {"embeds": [{"description": "message"}]}] if tx == mock_tx else []
         ),
     ) as mock_build_messages:

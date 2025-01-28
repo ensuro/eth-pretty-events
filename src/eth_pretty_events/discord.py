@@ -38,7 +38,7 @@ class DiscordOutput(OutputBase):
             session = session
             while True:
                 log = await queue.get()
-                messages = build_transaction_messages(self.renv, log.tx, log.decoded_logs)
+                messages = build_transaction_messages(self.renv, log.tx, log.decoded_logs, log.raw_logs)
                 for message in messages:
                     async with session.post(self.discord_url, json=message) as response:
                         if response.status > 204:
@@ -49,7 +49,7 @@ class DiscordOutput(OutputBase):
     def run_sync(self, logs: Iterable[DecodedTxLogs]):
         session = requests.Session()
         for log in logs:
-            messages = build_transaction_messages(self.renv, log.tx, log.decoded_logs)
+            messages = build_transaction_messages(self.renv, log.tx, log.decoded_logs, log.raw_logs)
             for message in messages:
                 response = session.post(self.discord_url, json=message)
                 if response.status_code > 204:
@@ -60,12 +60,15 @@ class DiscordOutput(OutputBase):
         raise NotImplementedError()  # Shouldn't be called
 
 
-def build_transaction_messages(renv, tx, tx_events) -> Iterable[dict]:
+def build_transaction_messages(renv, tx, tx_events, tx_raw_logs) -> Iterable[dict]:
     current_batch = []
     current_batch_size = 0
-
-    for event in tx_events:
+    for event, raw_event in zip(tx_events, tx_raw_logs):
         if event is None:
+            _logger.warning(
+                f"Unrecognized event tried to be rendered in tx: {tx.hash}, "
+                f"index: {raw_event.logIndex}, block: {tx.block.number}"
+            )
             continue
         template = find_template(renv.template_rules, event)
         if template is None:
@@ -85,7 +88,9 @@ def build_transaction_messages(renv, tx, tx_events) -> Iterable[dict]:
         yield {"embeds": current_batch}
 
 
-def build_and_send_messages(discord_url: str, renv, events: Iterable[Event]):
+def build_and_send_messages(
+    discord_url: str, renv, events: Iterable[Event]
+):  # No encuentro donde está función se está utilizando
     grouped_events = groupby(
         sorted(
             events,
@@ -100,7 +105,7 @@ def build_and_send_messages(discord_url: str, renv, events: Iterable[Event]):
 
     responses = []
     for tx, tx_events in grouped_events:
-        for message in build_transaction_messages(renv, tx, tx_events):
+        for message in build_transaction_messages(renv, tx, tx_events, []):  # Como obtengo raw_logs aqui?
             if message is None:
                 continue
             response = post(discord_url, message)
