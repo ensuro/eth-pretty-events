@@ -19,13 +19,13 @@ class PrintOutput(OutputBase):
         self.renv = renv
 
     def send_to_output_sync(self, log: DecodedTxLogs):
-        for event in log.decoded_logs:
+        for raw_event, event in zip(log.raw_logs, log.decoded_logs):
             if event is None:
                 _logger.warning(
                     f"Unrecognized event tried to be rendered in tx: {log.tx.hash}, "
-                    f"index: {log.tx.index}, block: {log.tx.block.number}"
+                    f"index: {raw_event.logIndex}, block: {log.tx.block.number}"
                 )
-                return
+                continue
             template_name = find_template(self.renv.template_rules, event)
             if template_name is None:
                 continue

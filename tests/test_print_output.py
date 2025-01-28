@@ -84,24 +84,36 @@ def mock_event(mock_tx):
     )
 
 
-def test_printoutput_unrecognized_event(dummy_renv, mock_tx, caplog):
+class MockRawLog:
+    def __init__(self, logIndex):
+        self.logIndex = logIndex
+
+
+@pytest.fixture
+def mock_raw_log():
+    return MockRawLog(logIndex=1)
+
+
+def test_printoutput_unrecognized_event(dummy_renv, mock_tx, mock_raw_log, caplog):
     url = urlparse("print://")
     output = PrintOutput(url, dummy_renv)
 
-    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[], decoded_logs=[None])
+    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[mock_raw_log], decoded_logs=[None])
     with caplog.at_level("WARNING"):
         output.send_to_output_sync(decoded_logs)
 
     assert "Unrecognized event tried to be rendered in tx" in caplog.text
 
 
-def test_printoutput_prints_event(dummy_renv, template_rules, template_loader, mock_tx, mock_event, capfd):
+def test_printoutput_prints_event(
+    dummy_renv, template_rules, template_loader, mock_tx, mock_event, mock_raw_log, capfd
+):
     dummy_renv.template_rules = template_rules
     dummy_renv.jinja_env = Environment(loader=FunctionLoader(template_loader))
     url = urlparse("print://")
     output = PrintOutput(url, dummy_renv)
 
-    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[], decoded_logs=[mock_event])
+    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[mock_raw_log], decoded_logs=[mock_event])
     output.send_to_output_sync(decoded_logs)
 
     captured = capfd.readouterr()

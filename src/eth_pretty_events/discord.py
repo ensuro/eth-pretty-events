@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import os
-from itertools import groupby
 from typing import Iterable
 from urllib.parse import ParseResult, parse_qs
 
@@ -12,7 +11,6 @@ import requests
 from .event_filter import find_template
 from .outputs import DecodedTxLogs, OutputBase
 from .render import render
-from .types import Event
 
 _logger = logging.getLogger(__name__)
 
@@ -38,7 +36,7 @@ class DiscordOutput(OutputBase):
             session = session
             while True:
                 log = await queue.get()
-                messages = build_transaction_messages(self.renv, log.tx, log.decoded_logs)
+                messages = build_transaction_messages(self.renv, log.tx, log.decoded_logs, log.raw_logs)
                 for message in messages:
                     async with session.post(self.discord_url, json=message) as response:
                         if response.status > 204:
@@ -49,7 +47,7 @@ class DiscordOutput(OutputBase):
     def run_sync(self, logs: Iterable[DecodedTxLogs]):
         session = requests.Session()
         for log in logs:
-            messages = build_transaction_messages(self.renv, log.tx, log.decoded_logs)
+            messages = build_transaction_messages(self.renv, log.tx, log.decoded_logs, log.raw_logs)
             for message in messages:
                 response = session.post(self.discord_url, json=message)
                 if response.status_code > 204:
@@ -60,12 +58,15 @@ class DiscordOutput(OutputBase):
         raise NotImplementedError()  # Shouldn't be called
 
 
-def build_transaction_messages(renv, tx, tx_events) -> Iterable[dict]:
+def build_transaction_messages(renv, tx, tx_events, tx_raw_logs) -> Iterable[dict]:
     current_batch = []
     current_batch_size = 0
-
-    for event in tx_events:
+    for event, raw_event in zip(tx_events, tx_raw_logs):
         if event is None:
+            _logger.warning(
+                f"Unrecognized event tried to be rendered in tx: {tx.hash}, "
+                f"index: {raw_event.logIndex}, block: {tx.block.number}"
+            )
             continue
         template = find_template(renv.template_rules, event)
         if template is None:
@@ -83,30 +84,6 @@ def build_transaction_messages(renv, tx, tx_events) -> Iterable[dict]:
 
     if current_batch:
         yield {"embeds": current_batch}
-
-
-def build_and_send_messages(discord_url: str, renv, events: Iterable[Event]):
-    grouped_events = groupby(
-        sorted(
-            events,
-            key=lambda event: (
-                event.tx.block.number,
-                event.tx.index,
-                event.log_index,
-            ),  # TODO: move this to the dunder methods on types.py?
-        ),
-        key=lambda event: event.tx,
-    )
-
-    responses = []
-    for tx, tx_events in grouped_events:
-        for message in build_transaction_messages(renv, tx, tx_events):
-            if message is None:
-                continue
-            response = post(discord_url, message)
-            responses.append(response)
-
-    return responses
 
 
 _session = None
