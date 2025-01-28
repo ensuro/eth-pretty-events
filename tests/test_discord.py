@@ -8,12 +8,7 @@ import requests
 from aiohttp import web
 from jinja2 import Environment, FunctionLoader
 
-from eth_pretty_events.discord import (
-    DiscordOutput,
-    build_and_send_messages,
-    build_transaction_messages,
-    post,
-)
+from eth_pretty_events.discord import DiscordOutput, build_transaction_messages, post
 from eth_pretty_events.event_filter import read_template_rules
 from eth_pretty_events.jinja2_ext import add_filters
 from eth_pretty_events.outputs import DecodedTxLogs
@@ -162,25 +157,10 @@ def test_build_transaction_messages_limits(dummy_renv, template_rules, template_
     assert all(sum(len(json.dumps(embed)) for embed in message["embeds"]) <= 5000 for message in messages)
 
 
-def test_build_and_send_messages(dummy_renv, template_rules, template_loader, mock_tx, alchemy_sample_events):
-    dummy_renv.template_rules = template_rules
-    dummy_renv.jinja_env = Environment(loader=FunctionLoader(template_loader))
-    add_filters(dummy_renv.jinja_env)
-
-    with patch("eth_pretty_events.discord.post") as mock_post:
-        mock_post.return_value = MagicMock(status_code=200)
-
-        discord_url = "https://discord.com/api/webhooks/test"
-
-        responses = build_and_send_messages(discord_url, dummy_renv, alchemy_sample_events)
-
-        assert mock_post.call_count == len(responses), f"Expected {len(responses)} calls, got {mock_post.call_count}"
-
-
 @pytest.mark.asyncio
 async def test_run_webhook_response(setup_output, alchemy_sample_events, mock_tx):
     output, queue, app = await setup_output
-    raw_logs = [{"logIndex": event.log_index} for event in alchemy_sample_events]
+    raw_logs = [{} for _ in alchemy_sample_events]  # Not used in this test, just needs to be the same length
     decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs, decoded_logs=alchemy_sample_events)
 
     task = asyncio.create_task(output.run(queue))
@@ -238,7 +218,7 @@ async def test_run_warning_logs(
     url = "discord://?from_env=DISCORD_URL"
     with patch.dict("os.environ", {"DISCORD_URL": str(webhook_url)}):
         output = DiscordOutput(urlparse(url), dummy_renv)
-    raw_logs = [{"logIndex": event.log_index} for event in alchemy_sample_events]
+    raw_logs = [{} for _ in alchemy_sample_events]  # Not used in this test, just needs to be the same length
     decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs, decoded_logs=alchemy_sample_events)
 
     with caplog.at_level("WARNING"):
@@ -265,7 +245,7 @@ def test_run_sync_with_warning_logs(
 
         with patch.dict("os.environ", {"DISCORD_URL": "https://discord.com/api/webhooks/test"}):
             output = DiscordOutput(urlparse(url), dummy_renv)
-            raw_logs = [{"logIndex": event.log_index} for event in alchemy_sample_events]
+            raw_logs = [{} for _ in alchemy_sample_events]  # Not used in this test, just needs to be the same length
             decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs, decoded_logs=alchemy_sample_events)
 
             with caplog.at_level("WARNING"):
@@ -291,25 +271,6 @@ async def test_send_to_output_sync_not_implemented(setup_output, mock_tx):
     await queue.put(decoded_logs)
     with pytest.raises(NotImplementedError):
         await output.send_to_output_sync(decoded_logs)
-
-
-def test_build_and_send_messages_none_messages(dummy_renv, mock_tx, alchemy_sample_events):
-    with patch(
-        "eth_pretty_events.discord.build_transaction_messages",
-        side_effect=lambda renv, tx, tx_events, tx_raw_logs: (
-            [None, {"embeds": [{"description": "message"}]}] if tx == mock_tx else []
-        ),
-    ) as mock_build_messages:
-        with patch("eth_pretty_events.discord.post") as mock_post:
-            mock_post.return_value = MagicMock(status_code=200)
-
-            discord_url = "https://discord.com/api/webhooks/test"
-
-            responses = build_and_send_messages(discord_url, dummy_renv, alchemy_sample_events)
-            mock_build_messages.assert_called()
-            mock_post.assert_called_once_with(discord_url, {"embeds": [{"description": "message"}]})
-            assert len(responses) == 1
-            assert responses[0].status_code == 200
 
 
 def test_post_initializes_session():

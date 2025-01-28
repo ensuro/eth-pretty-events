@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import os
-from itertools import groupby
 from typing import Iterable
 from urllib.parse import ParseResult, parse_qs
 
@@ -12,7 +11,6 @@ import requests
 from .event_filter import find_template
 from .outputs import DecodedTxLogs, OutputBase
 from .render import render
-from .types import Event
 
 _logger = logging.getLogger(__name__)
 
@@ -86,32 +84,6 @@ def build_transaction_messages(renv, tx, tx_events, tx_raw_logs) -> Iterable[dic
 
     if current_batch:
         yield {"embeds": current_batch}
-
-
-def build_and_send_messages(
-    discord_url: str, renv, events: Iterable[Event]
-):  # No encuentro donde está función se está utilizando
-    grouped_events = groupby(
-        sorted(
-            events,
-            key=lambda event: (
-                event.tx.block.number,
-                event.tx.index,
-                event.log_index,
-            ),  # TODO: move this to the dunder methods on types.py?
-        ),
-        key=lambda event: event.tx,
-    )
-
-    responses = []
-    for tx, tx_events in grouped_events:
-        for message in build_transaction_messages(renv, tx, tx_events, []):  # Como obtengo raw_logs aqui?
-            if message is None:
-                continue
-            response = post(discord_url, message)
-            responses.append(response)
-
-    return responses
 
 
 _session = None
