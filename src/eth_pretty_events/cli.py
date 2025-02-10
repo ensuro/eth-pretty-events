@@ -164,7 +164,6 @@ async def _do_listen_events(
             "logs",
             {
                 "address": addresses,
-                # Transfer from any address to 0x4c56A8EFdd7aFd6A708641e3754801fE0538eb80
                 "topics": topics,
             },
         )
@@ -244,6 +243,10 @@ async def _websocket_loop(ws_url, do_stuff_fn):
                 w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
             await do_stuff_fn(w3)
         except websockets.ConnectionClosed:
+            try:
+                await w3.provider.disconnect()
+            except Exception as err:
+                _logger.warning(f"Error disconnecting {err}")
             _logger.warning("WebSocket connection closed - Reconnecting")
             continue
 
