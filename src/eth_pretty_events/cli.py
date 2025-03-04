@@ -244,6 +244,7 @@ async def _websocket_loop(ws_url, do_stuff_fn):
             await do_stuff_fn(w3)
         except websockets.ConnectionClosed:
             try:
+                await w3.subscription_manager.unsubscribe_all()
                 await w3.provider.disconnect()
             except Exception as err:
                 _logger.warning(f"Error disconnecting {err}")
