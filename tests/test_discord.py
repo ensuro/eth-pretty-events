@@ -216,22 +216,22 @@ async def test_run_warning_logs(
 
     queue = asyncio.Queue()
     url = "discord://?from_env=DISCORD_URL"
-    with patch.dict("os.environ", {"DISCORD_URL": str(webhook_url)}):
+    with patch.dict("os.environ", {"DISCORD_URL": str(webhook_url), "MAX_ATTEMPTS": "2", "RETRY_TIME": "1"}):
         output = DiscordOutput(urlparse(url), dummy_renv)
-    raw_logs = [{} for _ in alchemy_sample_events]  # Not used in this test, just needs to be the same length
-    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs, decoded_logs=alchemy_sample_events)
+        raw_logs = [{} for _ in alchemy_sample_events]  # Not used in this test, just needs to be the same length
+        decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs, decoded_logs=alchemy_sample_events)
 
-    with caplog.at_level("WARNING"):
-        task = asyncio.create_task(output.run(queue))
-        await queue.put(decoded_logs)
-        await asyncio.sleep(1)
+        with caplog.at_level("WARNING"):
+            task = asyncio.create_task(output.run(queue))
+            await queue.put(decoded_logs)
+            await asyncio.sleep(2)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
 
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-
-    assert "Unexpected result 500" in caplog.text
-    assert "Discord response body: Internal Server Error" in caplog.text
+        assert "Unexpected result 500" in caplog.text
+        assert "Retrying in 1 seconds..." in caplog.text
+        assert "Discord response body: Internal Server Error" in caplog.text
 
 
 def test_run_sync_with_warning_logs(
@@ -243,7 +243,10 @@ def test_run_sync_with_warning_logs(
     url = "discord://?from_env=DISCORD_URL"
     with patch("requests.Session.post", return_value=MagicMock(status_code=500, content=b"Internal Server Error")):
 
-        with patch.dict("os.environ", {"DISCORD_URL": "https://discord.com/api/webhooks/test"}):
+        with patch.dict(
+            "os.environ",
+            {"DISCORD_URL": "https://discord.com/api/webhooks/test", "MAX_ATTEMPTS": "5", "RETRY_TIME": "5"},
+        ):
             output = DiscordOutput(urlparse(url), dummy_renv)
             raw_logs = [{} for _ in alchemy_sample_events]  # Not used in this test, just needs to be the same length
             decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs, decoded_logs=alchemy_sample_events)

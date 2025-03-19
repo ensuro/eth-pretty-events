@@ -38,10 +38,31 @@ class DiscordOutput(OutputBase):
                 log = await queue.get()
                 messages = build_transaction_messages(self.renv, log.tx, log.decoded_logs, log.raw_logs)
                 for message in messages:
-                    async with session.post(self.discord_url, json=message) as response:
-                        if response.status > 204:
-                            _logger.warning(f"Unexpected result {response.status}")
-                            _logger.warning("Discord response body: %s", await response.text())
+                    max_attempts = int(os.environ.get("MAX_ATTEMPTS"))
+                    attempt = 0
+                    while attempt < max_attempts:
+                        async with session.post(self.discord_url, json=message) as response:
+                            if 400 <= response.status < 500:
+                                _logger.error(
+                                    f"Unexpected result {response.status}. "
+                                    f"Discord response body: {await response.text()} "
+                                    f"- Payload: {json.dumps(message)}"
+                                )
+                                break
+                            elif response.status >= 500:
+                                _logger.warning(f"Unexpected result {response.status}")
+                                if attempt < max_attempts - 1:
+                                    _logger.warning(f"Retrying in {os.environ.get("RETRY_TIME")} seconds...")
+                                    await asyncio.sleep(int(os.environ.get("RETRY_TIME")))
+                                    attempt += 1
+                                    continue
+                                else:
+                                    _logger.error(
+                                        f"Discord response body: {await response.text()} "
+                                        f"- Payload: {json.dumps(message)}"
+                                    )
+                            break
+
                 queue.task_done()
 
     def run_sync(self, logs: Iterable[DecodedTxLogs]):
@@ -49,10 +70,30 @@ class DiscordOutput(OutputBase):
         for log in logs:
             messages = build_transaction_messages(self.renv, log.tx, log.decoded_logs, log.raw_logs)
             for message in messages:
-                response = session.post(self.discord_url, json=message)
-                if response.status_code > 204:
-                    _logger.warning(f"Unexpected result {response.status_code}")
-                    _logger.warning("Discord response body: %s", response.content.decode("utf-8"))
+                max_attempts = int(os.environ.get("MAX_ATTEMPTS"))
+                attempt = 0
+                while attempt <= max_attempts:
+                    response = session.post(self.discord_url, json=message)
+                    if 400 <= response.status_code < 500:
+                        _logger.warning(
+                            f"Unexpected result {response.status_code}. "
+                            f"Discord response body: {response.content.decode("utf-8")} "
+                            f"- Payload: {json.dumps(message)}"
+                        )
+                        break
+                    elif 500 >= response.status_code:
+                        _logger.warning(f"Unexpected result {response.status_code}")
+                        if attempt < max_attempts:
+                            _logger.warning(f"Retrying in {os.environ.get("RETRY_TIME")} seconds...")
+                            asyncio.sleep(int(os.environ.get("RETRY_TIME")))
+                            attempt += 1
+                            continue
+                        else:
+                            _logger.error(
+                                f"Discord response body: {response.content.decode("utf-8")}  "
+                                f"- Payload: {json.dumps(message)}"
+                            )
+                    break
 
     def send_to_output_sync(self, log: DecodedTxLogs):
         raise NotImplementedError()  # Shouldn't be called
@@ -73,7 +114,9 @@ def build_transaction_messages(renv, tx, tx_events, tx_raw_logs) -> Iterable[dic
             continue
         description = render(renv.jinja_env, event, [template, renv.args.on_error_template])
         if len(description) > 4096:
-            description = description[: 4096 - 100]
+            description = description[
+                : 4096 - 100
+            ]  # Truncate description so it does not exceed 4096 Discord limit description.
             _logger.info(
                 f"Truncated description for event in tx: {tx.hash}, index: {raw_event.logIndex} "
                 f"(original length: {len(description)}, new length: {len(description)})"
@@ -82,8 +125,7 @@ def build_transaction_messages(renv, tx, tx_events, tx_raw_logs) -> Iterable[dic
         embed_size = len(json.dumps(embed))
 
         if current_batch_size + embed_size > 5000 or len(current_batch) == 9:
-            if current_batch:
-                yield {"embeds": current_batch}
+            yield {"embeds": current_batch}
             current_batch = []
             current_batch_size = 0
 
