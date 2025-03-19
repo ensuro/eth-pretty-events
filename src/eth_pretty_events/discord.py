@@ -77,7 +77,7 @@ class DiscordOutput(OutputBase):
                     if 400 <= response.status_code < 500:
                         _logger.warning(
                             f"Unexpected result {response.status_code}. "
-                            f"Discord response body: {response.content.decode("utf-8")} "
+                            f"Discord response body: {response.content.decode('utf-8')} "
                             f"- Payload: {json.dumps(message)}"
                         )
                         break
@@ -90,7 +90,7 @@ class DiscordOutput(OutputBase):
                             continue
                         else:
                             _logger.error(
-                                f"Discord response body: {response.content.decode("utf-8")}  "
+                                f"Discord response body: {response.content.decode('utf-8')}  "
                                 f"- Payload: {json.dumps(message)}"
                             )
                     break
