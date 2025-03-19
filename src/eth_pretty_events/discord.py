@@ -52,7 +52,7 @@ class DiscordOutput(OutputBase):
                             elif response.status >= 500:
                                 _logger.warning(f"Unexpected result {response.status}")
                                 if attempt < max_attempts - 1:
-                                    _logger.warning(f"Retrying in {os.environ.get("RETRY_TIME")} seconds...")
+                                    _logger.warning(f"Retrying in {os.environ.get('RETRY_TIME')} seconds...")
                                     await asyncio.sleep(int(os.environ.get("RETRY_TIME")))
                                     attempt += 1
                                     continue
@@ -84,7 +84,7 @@ class DiscordOutput(OutputBase):
                     elif 500 >= response.status_code:
                         _logger.warning(f"Unexpected result {response.status_code}")
                         if attempt < max_attempts:
-                            _logger.warning(f"Retrying in {os.environ.get("RETRY_TIME")} seconds...")
+                            _logger.warning(f"Retrying in {os.environ.get('RETRY_TIME')} seconds...")
                             asyncio.sleep(int(os.environ.get("RETRY_TIME")))
                             attempt += 1
                             continue
