@@ -162,19 +162,24 @@ async def test_run_webhook_response(setup_output, alchemy_sample_events, mock_tx
     output, queue, app = await setup_output
     raw_logs = [{} for _ in alchemy_sample_events]  # Not used in this test, just needs to be the same length
     decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs, decoded_logs=alchemy_sample_events)
+    with patch.dict(
+        "os.environ",
+        {
+            "MAX_ATTEMPTS": "1",
+        },
+    ):
+        task = asyncio.create_task(output.run(queue))
+        await queue.put(decoded_logs)
+        await asyncio.sleep(1)
 
-    task = asyncio.create_task(output.run(queue))
-    await queue.put(decoded_logs)
-    await asyncio.sleep(1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
 
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-
-    assert len(app["payloads"]) > 0
-    payload = app["payloads"][0]
-    assert "embeds" in payload
-    assert len(payload["embeds"]) > 0
+        assert len(app["payloads"]) > 0
+        payload = app["payloads"][0]
+        assert "embeds" in payload
+        assert len(payload["embeds"]) > 0
 
 
 def test_run_sync_with_valid_messages(dummy_renv, template_rules, template_loader, alchemy_sample_events, mock_tx):
@@ -216,7 +221,14 @@ async def test_run_warning_logs(
 
     queue = asyncio.Queue()
     url = "discord://?from_env=DISCORD_URL"
-    with patch.dict("os.environ", {"DISCORD_URL": str(webhook_url), "MAX_ATTEMPTS": "2", "RETRY_TIME": "1"}):
+    with patch.dict(
+        "os.environ",
+        {
+            "DISCORD_URL": str(webhook_url),
+            "MAX_ATTEMPTS": "2",
+            "RETRY_TIME": "1",
+        },  # Use this time & retries to avoid too much sleep time
+    ):
         output = DiscordOutput(urlparse(url), dummy_renv)
         raw_logs = [{} for _ in alchemy_sample_events]  # Not used in this test, just needs to be the same length
         decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs, decoded_logs=alchemy_sample_events)
@@ -245,7 +257,11 @@ def test_run_sync_with_warning_logs(
 
         with patch.dict(
             "os.environ",
-            {"DISCORD_URL": "https://discord.com/api/webhooks/test", "MAX_ATTEMPTS": "5", "RETRY_TIME": "5"},
+            {
+                "DISCORD_URL": "https://discord.com/api/webhooks/test",
+                "MAX_ATTEMPTS": "2",
+                "RETRY_TIME": "1",
+            },  # Use this time & retries to avoid too much sleep time
         ):
             output = DiscordOutput(urlparse(url), dummy_renv)
             raw_logs = [{} for _ in alchemy_sample_events]  # Not used in this test, just needs to be the same length
@@ -255,6 +271,7 @@ def test_run_sync_with_warning_logs(
                 output.run_sync([decoded_logs])
 
             assert "Unexpected result 500" in caplog.text
+            assert "Retrying in 1 seconds..." in caplog.text
             assert "Discord response body: Internal Server Error" in caplog.text
 
 
