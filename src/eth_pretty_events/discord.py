@@ -113,13 +113,14 @@ def build_transaction_messages(renv, tx, tx_events, tx_raw_logs) -> Iterable[dic
         if template is None:
             continue
         description = render(renv.jinja_env, event, [template, renv.args.on_error_template])
-        if len(description) > 4096:
+        original_description_length = len(description)
+        if original_description_length > 4096:
             description = description[
                 : 4096 - 100
             ]  # Truncate description so it does not exceed 4096 Discord limit description.
             _logger.info(
-                f"Truncated description for event in tx: {tx.hash}, index: {raw_event.logIndex} "
-                f"(original length: {len(description)}, new length: {len(description)})"
+                f"Truncated description for event in tx: {tx.hash}, index: {event.log_index} "
+                f"(original length: {original_description_length}, new length: {len(description)})"
             )
         embed = {"description": description}
         embed_size = len(json.dumps(embed))
