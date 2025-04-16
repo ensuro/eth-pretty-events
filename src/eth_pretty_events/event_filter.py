@@ -2,9 +2,9 @@ import operator
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from eth_utils import keccak
 
@@ -257,6 +257,7 @@ class TrueEventFilter(EventFilter):
 class TemplateRule:
     template: str
     match: EventFilter
+    tags: List[str] = field(default_factory=list)
 
 
 def read_template_rules(template_rules: dict) -> Sequence[TemplateRule]:
@@ -269,7 +270,8 @@ def read_template_rules(template_rules: dict) -> Sequence[TemplateRule]:
             filter = filters[0]
         else:
             filter = AndEventFilter(filters)
-        ret.append(TemplateRule(template=rule["template"], match=filter))
+        tags = rule.get("tags", [])
+        ret.append(TemplateRule(template=rule["template"], match=filter, tags=tags))
     return ret
 
 

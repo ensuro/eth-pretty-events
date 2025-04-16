@@ -18,6 +18,8 @@ class PubSubOutputBase(OutputBase):
         self.dry_run = query_params.get("dry_run", ["false"])[0].lower() == "true"
         self.project_id = query_params.get("project_id", [None])[0]
         self.topic = query_params.get("topic", [None])[0]
+        tags = query_params.get("tags", [None])[0]
+        self.tags = [tag.strip() for tag in tags.split(",")] if tags else None
 
         if not self.project_id or not self.topic:
             raise RuntimeError("Both 'project_id' and 'topic' must be specified in the query string")
