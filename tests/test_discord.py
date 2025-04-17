@@ -223,8 +223,10 @@ def test_build_transaction_messages_with_tag_filter(
         log_index=0,
     )
 
-    tx_raw_logs = [{"logIndex": 0}]
-    messages = list(build_transaction_messages(dummy_renv, mock_tx, [tagged_event], tx_raw_logs, tags=["alerts"]))
+    all_events = alchemy_sample_events + [tagged_event]  # al the sample events + the event to be filtered.
+    tx_raw_logs = [{"logIndex": e.log_index} for e in all_events]
+
+    messages = list(build_transaction_messages(dummy_renv, mock_tx, all_events, tx_raw_logs, tags=["alerts"]))
 
     assert len(messages) == 1
 
