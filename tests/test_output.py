@@ -116,3 +116,13 @@ def test_outputbase_register_duplicate_type():
     type = "dummy"
     with pytest.raises(ValueError, match=f"Duplicate output type {type}"):
         OutputBase.register(type)(DummyOutput)
+
+
+def test_outputbase_tags():
+    output = DummyOutput(urlparse("dummy://localhost?tags=foo,bar,baz"))
+    assert output.tags == ["foo", "bar", "baz"]
+
+
+def test_outputbase_tags_none():
+    output = DummyOutput(urlparse("dummy://localhost"))
+    assert output.tags is None
