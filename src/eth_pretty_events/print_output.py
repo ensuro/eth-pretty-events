@@ -18,9 +18,6 @@ class PrintOutput(OutputBase):
         self.output_file = open(self.filename, "w") if self.filename else sys.stdout
         self.renv = renv
 
-        tags = query_params.get("tags", [None])[0]
-        self.tags = [tag.strip() for tag in tags.split(",")] if tags else None
-
     def send_to_output_sync(self, log: DecodedTxLogs):
         if self.tags is not None:
             template_rules = [tr for tr in self.renv.template_rules if any(tag in tr.tags for tag in self.tags)]

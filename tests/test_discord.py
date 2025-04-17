@@ -157,7 +157,7 @@ def test_build_transaction_messages_limits(dummy_renv, template_rules, template_
     add_filters(dummy_renv.jinja_env)
 
     tx_raw_logs = [{} for _ in alchemy_sample_events]
-    messages = list(build_transaction_messages(dummy_renv, mock_tx, alchemy_sample_events, tx_raw_logs, tags=None))
+    messages = list(build_transaction_messages(dummy_renv, mock_tx, alchemy_sample_events, tx_raw_logs))
 
     assert len(messages) >= 1
     assert all(len(message["embeds"]) <= 9 for message in messages)
@@ -204,7 +204,7 @@ def test_run_sync_with_valid_messages(dummy_renv, template_rules, template_loade
             output.run_sync([decoded_logs])
 
             assert mock_post.call_count == len(
-                list(build_transaction_messages(dummy_renv, mock_tx, alchemy_sample_events, tx_raw_logs=[], tags=None))
+                list(build_transaction_messages(dummy_renv, mock_tx, alchemy_sample_events, tx_raw_logs=[]))
             )
 
 
@@ -372,7 +372,7 @@ def test_run_sync_with_warning_logs_400(
 def test_build_transaction_messages_none_events(dummy_renv, mock_tx):
     dummy_renv.template_rules = []
     events = [None, Event(tx=mock_tx, address="0x0", args={}, name="TestEvent", log_index=0)]
-    messages = list(build_transaction_messages(dummy_renv, mock_tx, events, tx_raw_logs=[], tags=None))
+    messages = list(build_transaction_messages(dummy_renv, mock_tx, events, tx_raw_logs=[]))
     assert len(messages) == 0
 
 
@@ -445,7 +445,7 @@ def test_build_transaction_large_description_truncation_one_event(
     tx_raw_logs = [{"logIndex": large_event.log_index}]
 
     with caplog.at_level("INFO"):
-        messages = list(build_transaction_messages(dummy_renv, mock_tx, [large_event], tx_raw_logs, tags=None))
+        messages = list(build_transaction_messages(dummy_renv, mock_tx, [large_event], tx_raw_logs))
 
     assert len(messages) == 1
     assert "embeds" in messages[0]
@@ -480,7 +480,7 @@ def test_build_transaction_first_event_large_description_truncates_in_multiple_e
     tx_raw_logs = [{"logIndex": event.log_index} for event in tx_events]
 
     with caplog.at_level("INFO"):
-        messages = list(build_transaction_messages(dummy_renv, mock_tx, tx_events, tx_raw_logs, tags=None))
+        messages = list(build_transaction_messages(dummy_renv, mock_tx, tx_events, tx_raw_logs))
 
     assert all(len(message["embeds"]) <= 9 for message in messages)
     assert all(sum(len(json.dumps(embed)) for embed in message["embeds"]) <= 5000 for message in messages)

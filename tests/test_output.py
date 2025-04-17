@@ -1,5 +1,6 @@
 import asyncio
 from unittest.mock import AsyncMock, patch
+from urllib.parse import urlparse
 
 import pytest
 from web3 import types as web3types
@@ -15,7 +16,7 @@ def queue():
 
 @pytest.fixture
 def dummy_output(queue):
-    return DummyOutput(queue)
+    return DummyOutput(urlparse("dummy://url"))
 
 
 def test_outputbase_register(dummy_output):

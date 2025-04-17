@@ -31,9 +31,6 @@ class DiscordOutput(OutputBase):
         self.discord_url = discord_url
         self.renv = renv
 
-        tags = query_params.get("tags", [None])[0]
-        self.tags = [tag.strip() for tag in tags.split(",")] if tags else None
-
     async def run(self, queue: asyncio.Queue[DecodedTxLogs]):
         async with aiohttp.ClientSession() as session:
             session = session
@@ -102,7 +99,7 @@ class DiscordOutput(OutputBase):
         raise NotImplementedError()  # Shouldn't be called
 
 
-def build_transaction_messages(renv, tx, tx_events, tx_raw_logs, tags=List[str]) -> Iterable[dict]:
+def build_transaction_messages(renv, tx, tx_events, tx_raw_logs, tags: List[str] = None) -> Iterable[dict]:
     current_batch = []
     current_batch_size = 0
     if tags is not None:
