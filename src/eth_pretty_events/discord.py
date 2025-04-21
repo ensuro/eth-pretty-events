@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from typing import Iterable
 from urllib.parse import ParseResult, parse_qs
 
@@ -14,8 +15,8 @@ from .render import render
 
 _logger = logging.getLogger(__name__)
 
-MAX_ATTEMPTS = int(os.environ.get("MAX_ATTEMPTS", 3))
-RETRY_TIME = int(os.environ.get("RETRY_TIME", 5))
+MAX_ATTEMPTS = float(os.environ.get("MAX_ATTEMPTS", 3))
+RETRY_TIME = float(os.environ.get("RETRY_TIME", 5))
 
 
 @OutputBase.register("discord")
@@ -41,8 +42,7 @@ class DiscordOutput(OutputBase):
                 log = await queue.get()
                 messages = build_transaction_messages(self.renv, log.tx, log.decoded_logs, log.raw_logs)
                 for message in messages:
-                    attempt = 0
-                    while attempt < MAX_ATTEMPTS:
+                    for attempt in range(MAX_ATTEMPTS):
                         async with session.post(self.discord_url, json=message) as response:
                             if 400 <= response.status < 500:
                                 _logger.error(
@@ -56,15 +56,11 @@ class DiscordOutput(OutputBase):
                                 if attempt < MAX_ATTEMPTS - 1:
                                     _logger.warning(f"Retrying in {RETRY_TIME} seconds...")
                                     await asyncio.sleep(RETRY_TIME)
-                                    attempt += 1
-                                    continue
                                 else:
                                     _logger.error(
                                         f"Discord response body: {await response.text()} "
                                         f"- Payload: {json.dumps(message)}"
                                     )
-                            break
-
                 queue.task_done()
 
     def run_sync(self, logs: Iterable[DecodedTxLogs]):
@@ -72,8 +68,7 @@ class DiscordOutput(OutputBase):
         for log in logs:
             messages = build_transaction_messages(self.renv, log.tx, log.decoded_logs, log.raw_logs)
             for message in messages:
-                attempt = 0
-                while attempt <= MAX_ATTEMPTS:
+                for attempt in range(MAX_ATTEMPTS):
                     response = session.post(self.discord_url, json=message)
                     if 400 <= response.status_code < 500:
                         _logger.warning(
@@ -82,19 +77,16 @@ class DiscordOutput(OutputBase):
                             f"- Payload: {json.dumps(message)}"
                         )
                         break
-                    elif 500 >= response.status_code:
+                    elif response.status_code >= 500:
                         _logger.warning(f"Unexpected result {response.status_code}")
-                        if attempt < MAX_ATTEMPTS:
+                        if attempt < MAX_ATTEMPTS - 1:
                             _logger.warning(f"Retrying in {RETRY_TIME} seconds...")
-                            asyncio.sleep(RETRY_TIME)
-                            attempt += 1
-                            continue
+                            time.sleep(RETRY_TIME)
                         else:
                             _logger.error(
-                                f"Discord response body: {response.content.decode('utf-8')}  "
+                                f"Discord response body: {response.content.decode('utf-8')} "
                                 f"- Payload: {json.dumps(message)}"
                             )
-                    break
 
     def send_to_output_sync(self, log: DecodedTxLogs):
         raise NotImplementedError()  # Shouldn't be called

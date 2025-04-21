@@ -131,14 +131,9 @@ def test_render_tx_endpoint(test_client, renv):
     tx = factories.Tx()
     renv.args.outputs = ["discord://?from_env=DISCORD_URL"]
     renv.args.on_error_template = "generic-event-on-error.md.j2"
-    with patch.dict(
-        "os.environ",
-        {
-            "DISCORD_URL": "http://example.org/discord-webhook",
-            "MAX_ATTEMPTS": "2",
-            "RETRY_TIME": "1",
-        },  # Use this time & retries to avoid too much sleep time
-    ):
+    with patch.dict("os.environ", {"DISCORD_URL": "https://discord.com/api/webhooks"}), patch(
+        "eth_pretty_events.discord.MAX_ATTEMPTS", 2
+    ), patch("eth_pretty_events.discord.RETRY_TIME", 1):
         response = test_client.get(f"/render/tx/{tx.hash}/")
         assert response.status_code == 200
         assert response.json == {"status": "OK", "ok_count": 1, "failed_count": 0}
@@ -149,14 +144,9 @@ def test_alchemy_webhook_happy(test_client, renv):
         payload = f.read()
     renv.args.outputs = ["discord://?from_env=DISCORD_URL"]
     renv.args.on_error_template = "generic-event-on-error.md.j2"
-    with patch.dict(
-        "os.environ",
-        {
-            "DISCORD_URL": "http://example.org/discord-webhook",
-            "MAX_ATTEMPTS": "2",
-            "RETRY_TIME": "1",
-        },  # Use this time & retries to avoid too much sleep time
-    ):
+    with patch.dict("os.environ", {"DISCORD_URL": "https://discord.com/api/webhooks"}), patch(
+        "eth_pretty_events.discord.MAX_ATTEMPTS", 2
+    ), patch("eth_pretty_events.discord.RETRY_TIME", 1):
         response = test_client.post(
             "/alchemy-webhook/",
             data=payload,
