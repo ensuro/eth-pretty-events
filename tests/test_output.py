@@ -1,5 +1,6 @@
 import asyncio
 from unittest.mock import AsyncMock, patch
+from urllib.parse import urlparse
 
 import pytest
 from web3 import types as web3types
@@ -15,7 +16,7 @@ def queue():
 
 @pytest.fixture
 def dummy_output(queue):
-    return DummyOutput(queue)
+    return DummyOutput(urlparse("dummy://url"))
 
 
 def test_outputbase_register(dummy_output):
@@ -115,3 +116,13 @@ def test_outputbase_register_duplicate_type():
     type = "dummy"
     with pytest.raises(ValueError, match=f"Duplicate output type {type}"):
         OutputBase.register(type)(DummyOutput)
+
+
+def test_outputbase_tags():
+    output = DummyOutput(urlparse("dummy://localhost?tags=foo,bar,baz"))
+    assert output.tags == ["foo", "bar", "baz"]
+
+
+def test_outputbase_tags_none():
+    output = DummyOutput(urlparse("dummy://localhost"))
+    assert output.tags is None

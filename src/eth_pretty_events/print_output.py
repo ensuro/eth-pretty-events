@@ -19,6 +19,10 @@ class PrintOutput(OutputBase):
         self.renv = renv
 
     def send_to_output_sync(self, log: DecodedTxLogs):
+        if self.tags is not None:
+            template_rules = [tr for tr in self.renv.template_rules if any(tag in tr.tags for tag in self.tags)]
+        else:
+            template_rules = self.renv.template_rules
         for raw_event, event in zip(log.raw_logs, log.decoded_logs):
             if event is None:
                 _logger.warning(
@@ -26,7 +30,7 @@ class PrintOutput(OutputBase):
                     f"index: {raw_event.logIndex}, block: {log.tx.block.number}"
                 )
                 continue
-            template_name = find_template(self.renv.template_rules, event)
+            template_name = find_template(template_rules, event)
             if template_name is None:
                 continue
             rendered_event = render(self.renv.jinja_env, event, [template_name, self.renv.args.on_error_template])

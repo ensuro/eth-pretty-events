@@ -3,7 +3,7 @@ import pprint
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Iterable, List, Optional
-from urllib.parse import ParseResult, urlparse
+from urllib.parse import ParseResult, parse_qs, urlparse
 
 from web3 import types as web3types
 
@@ -20,8 +20,10 @@ class DecodedTxLogs:
 class OutputBase(ABC):
     OUTPUT_REGISTRY = {}
 
-    def __init__(self, *args, **kwargs):
-        pass
+    def __init__(self, url: ParseResult):
+        query_params = parse_qs(url.query)
+        tags = query_params.get("tags", [None])[0]
+        self.tags: Optional[List[str]] = [tag.strip() for tag in tags.split(",")] if tags else None
 
     def run_sync(self, logs: Iterable[DecodedTxLogs]):
         for log in logs:
@@ -60,5 +62,8 @@ class OutputBase(ABC):
 
 @OutputBase.register("dummy")
 class DummyOutput(OutputBase):
+    def __init__(self, url: ParseResult, renv=None):
+        super().__init__(url)
+
     def send_to_output_sync(self, log: DecodedTxLogs):
         pprint.pprint(log)

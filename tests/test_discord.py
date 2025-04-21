@@ -63,6 +63,7 @@ def template_rules():
                     "match": [{"event": "LargeDescriptionEvent"}],
                     "template": "large-description-event.md.j2",
                 },  # Example template rule for too long description event test
+                {"match": [{"event": "TaggedTransfer"}], "template": "ERC20-transfer.md.j2", "tags": ["alerts"]},
             ]
         }
     )
@@ -199,6 +200,29 @@ def test_run_sync_with_valid_messages(dummy_renv, template_rules, template_loade
             assert mock_post.call_count == len(
                 list(build_transaction_messages(dummy_renv, mock_tx, alchemy_sample_events, tx_raw_logs=[]))
             )
+
+
+def test_build_transaction_messages_with_tag_filter(
+    dummy_renv, template_rules, template_loader, alchemy_sample_events, mock_tx
+):
+    dummy_renv.template_rules = template_rules
+    dummy_renv.jinja_env = Environment(loader=FunctionLoader(template_loader))
+    add_filters(dummy_renv.jinja_env)
+
+    tagged_event = Event(
+        tx=mock_tx,
+        address="0xabc123",
+        args={"from_": "0xabc", "to": "0xdef", "value": 123},
+        name="TaggedTransfer",
+        log_index=0,
+    )
+
+    all_events = alchemy_sample_events + [tagged_event]  # al the sample events + the event to be filtered.
+    tx_raw_logs = [{"logIndex": e.log_index} for e in all_events]
+
+    messages = list(build_transaction_messages(dummy_renv, mock_tx, all_events, tx_raw_logs, tags=["alerts"]))
+
+    assert len(messages) == 1
 
 
 @pytest.mark.asyncio

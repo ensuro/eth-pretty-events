@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import time
-from typing import Iterable
+from typing import Iterable, List
 from urllib.parse import ParseResult, parse_qs
 
 import aiohttp
@@ -40,7 +40,7 @@ class DiscordOutput(OutputBase):
             session = session
             while True:
                 log = await queue.get()
-                messages = build_transaction_messages(self.renv, log.tx, log.decoded_logs, log.raw_logs)
+                messages = build_transaction_messages(self.renv, log.tx, log.decoded_logs, log.raw_logs, self.tags)
                 for message in messages:
                     for attempt in range(self.max_attempts):
                         async with session.post(self.discord_url, json=message) as response:
@@ -67,7 +67,7 @@ class DiscordOutput(OutputBase):
     def run_sync(self, logs: Iterable[DecodedTxLogs]):
         session = requests.Session()
         for log in logs:
-            messages = build_transaction_messages(self.renv, log.tx, log.decoded_logs, log.raw_logs)
+            messages = build_transaction_messages(self.renv, log.tx, log.decoded_logs, log.raw_logs, self.tags)
             for message in messages:
                 for attempt in range(self.max_attempts):
                     response = session.post(self.discord_url, json=message)
@@ -94,9 +94,13 @@ class DiscordOutput(OutputBase):
         raise NotImplementedError()  # Shouldn't be called
 
 
-def build_transaction_messages(renv, tx, tx_events, tx_raw_logs) -> Iterable[dict]:
+def build_transaction_messages(renv, tx, tx_events, tx_raw_logs, tags: List[str] = None) -> Iterable[dict]:
     current_batch = []
     current_batch_size = 0
+    if tags is not None:
+        template_rules = [tr for tr in renv.template_rules if any(tag in tr.tags for tag in tags)]
+    else:
+        template_rules = renv.template_rules
     for event, raw_event in zip(tx_events, tx_raw_logs):
         if event is None:
             _logger.warning(
@@ -104,7 +108,7 @@ def build_transaction_messages(renv, tx, tx_events, tx_raw_logs) -> Iterable[dic
                 f"index: {raw_event.logIndex}, block: {tx.block.number}"
             )
             continue
-        template = find_template(renv.template_rules, event)
+        template = find_template(template_rules, event)
         if template is None:
             continue
         description = render(renv.jinja_env, event, [template, renv.args.on_error_template])
