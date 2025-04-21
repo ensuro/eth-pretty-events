@@ -15,9 +15,6 @@ from .render import render
 
 _logger = logging.getLogger(__name__)
 
-MAX_ATTEMPTS = int(os.environ.get("MAX_ATTEMPTS", 3))
-RETRY_TIME = float(os.environ.get("RETRY_TIME", 5))
-
 
 @OutputBase.register("discord")
 class DiscordOutput(OutputBase):
