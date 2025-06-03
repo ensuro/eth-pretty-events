@@ -124,7 +124,7 @@ def timestamp(value):
 
 def amount(value, decimals="auto"):
     if decimals == "auto":
-        if value < 14**10:
+        if value < 10**14:
             decimals = 6
         else:
             decimals = 18
