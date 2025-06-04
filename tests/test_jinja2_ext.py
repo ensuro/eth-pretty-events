@@ -204,7 +204,7 @@ def test_is_struct(input_value, expected_output):
             "0xabc1230000000000000000000000000000000000000000000000000000000000",
         ),
         (1234567890, {"type": "uint256", "name": "amount"}, "1234.56789"),
-        (289254654977, {"type": "uint256", "name": "amount"}, "2.89254654977E-7"),
+        (289254654977, {"type": "uint256", "name": "amount"}, "289254.654977"),
         (2**256 - 1, {"type": "uint256", "name": "amount"}, "infinite"),
         (1234567890, {"type": "uint40", "name": "timestamp"}, "2009-02-13T23:31:30Z"),
         (1723044031, {"type": "uint40", "name": "start"}, "2024-08-07T15:20:31Z"),
