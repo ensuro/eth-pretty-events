@@ -1,4 +1,5 @@
 import itertools
+import logging
 from operator import itemgetter
 from typing import Iterable, List, Optional, Sequence
 
@@ -9,6 +10,8 @@ from .alchemy_utils import graphql_log_to_log_receipt
 from .event_parser import EventDefinition
 from .outputs import DecodedTxLogs
 from .types import Block, Chain, Event, Hash, Tx
+
+logger = logging.getLogger(__name__)
 
 
 def decode_from_alchemy_input(alchemy_input: dict, chain: Chain) -> Iterable[DecodedTxLogs]:
@@ -78,6 +81,7 @@ def decode_events_from_subscription(
     batch_range = (block_from, min(block_to, block_from + block_limit - 1))
 
     while True:
+        logger.info("Processing from block %s to %s", batch_range[0], batch_range[1])
         resp = w3.eth.get_logs(log_filter | {"fromBlock": hex(batch_range[0]), "toBlock": hex(batch_range[1])})
         for (block_hash, block_number), logs_for_block in itertools.groupby(
             resp, itemgetter("blockHash", "blockNumber")

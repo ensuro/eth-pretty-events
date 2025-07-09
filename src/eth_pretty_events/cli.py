@@ -536,12 +536,12 @@ def parse_args(args):
         default="earliest",
     )
     render_events.add_argument(
-        "--subscriptions-block-to", type=str, help="Block range start (when doing eth_getLogs filter)", default="latest"
+        "--subscriptions-block-to", type=str, help="Block range end (when doing eth_getLogs filter)", default="latest"
     )
     render_events.add_argument(
         "--subscriptions-block-limit",
         type=int,
-        help="Block range start (when doing eth_getLogs filter)",
+        help="Block batch size (when doing eth_getLogs filter)",
         default=_env_int("GET_LOGS_BLOCK_LIMIT", 500),
     )
 
