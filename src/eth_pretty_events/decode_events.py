@@ -1,4 +1,6 @@
 import itertools
+import logging
+from operator import itemgetter
 from typing import Iterable, List, Optional, Sequence
 
 from web3 import Web3
@@ -8,6 +10,8 @@ from .alchemy_utils import graphql_log_to_log_receipt
 from .event_parser import EventDefinition
 from .outputs import DecodedTxLogs
 from .types import Block, Chain, Event, Hash, Tx
+
+logger = logging.getLogger(__name__)
 
 
 def decode_from_alchemy_input(alchemy_input: dict, chain: Chain) -> Iterable[DecodedTxLogs]:
@@ -62,3 +66,40 @@ def decode_events_from_block(block_number: int, w3: Web3, chain: Chain) -> Itera
         yield DecodedTxLogs(
             tx=tx, raw_logs=receipt.logs, decoded_logs=decode_events_from_raw_logs(block, tx, receipt.logs)
         )
+
+
+def decode_events_from_subscription(
+    subscription, w3: Web3, chain: Chain, block_from: int, block_to: int, block_limit: int = 500
+):
+    name, addresses, topics = subscription
+    log_filter = {}
+    if addresses:
+        log_filter["address"] = addresses
+    if topics:
+        log_filter["topics"] = topics
+
+    batch_range = (block_from, min(block_to, block_from + block_limit - 1))
+
+    while True:
+        logger.info("Processing from block %s to %s", batch_range[0], batch_range[1])
+        resp = w3.eth.get_logs(log_filter | {"fromBlock": hex(batch_range[0]), "toBlock": hex(batch_range[1])})
+        for (block_hash, block_number), logs_for_block in itertools.groupby(
+            resp, itemgetter("blockHash", "blockNumber")
+        ):
+            block = Block(
+                chain=chain,
+                hash=Hash(block_hash),
+                number=block_number,
+                timestamp=w3.eth.get_block(block_number).timestamp,
+            )
+            for (tx_hash, tx_index), logs_for_tx in itertools.groupby(
+                logs_for_block, itemgetter("transactionHash", "transactionIndex")
+            ):
+                tx = Tx(block=block, hash=Hash(tx_hash), index=tx_index)
+                logs_for_tx = list(logs_for_tx)
+                yield DecodedTxLogs(
+                    tx=tx, raw_logs=logs_for_tx, decoded_logs=decode_events_from_raw_logs(block, tx, logs_for_tx)
+                )
+        if batch_range[1] == block_to:
+            break
+        batch_range = batch_range[1] + 1, min(block_to, batch_range[1] + block_limit)

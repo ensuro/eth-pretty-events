@@ -303,6 +303,42 @@ async def listen_events(args):
     await asyncio.gather(listen_worker, parse_worker, *output_workers)
 
 
+def _block_to_int(w3: Web3, block: str) -> int:
+    if block.isdigit():
+        return int(block)
+    if block.startswith("0x"):
+        return int(block, 16)
+    if block not in ["earliest", "latest", "finalized", "pending"]:
+        raise argparse.ArgumentTypeError(f"Invalid block: '{block}'")
+    return w3.eth.get_block(block).number
+
+
+def _consolidate_logs(decoded_logs_for_sub: List[Sequence[DecodedTxLogs]]) -> Sequence[DecodedTxLogs]:
+    """
+    Takes a list of sequences of DecodedTxLogs and consolidates them in a new list
+    that is ordered by block and transaction index and that has the found logs merged
+    """
+    txs = {dl.tx.hash: dl for dl in decoded_logs_for_sub[0]}
+    for decoded_logs in decoded_logs_for_sub[1:]:
+        for decoded_log in decoded_logs:
+            tx_hash = decoded_log.tx.hash
+            if tx_hash not in txs:
+                txs[tx_hash] = decoded_log
+            else:
+                old_dl = txs[tx_hash]
+                old_logs = zip(old_dl.raw_logs, old_dl.decoded_logs)
+                indexes = [x.logIndex for x in old_dl.raw_logs]
+                new_logs = [
+                    x for x in zip(decoded_log.raw_logs, decoded_log.decoded_logs) if x[0]["logIndex"] not in indexes
+                ]
+                if not new_logs:
+                    continue
+                merged_logs = sorted(list(old_logs) + new_logs, key=lambda rd: rd[0]["logIndex"])
+                raw, decoded = zip(*merged_logs)  # unzips
+                txs[tx_hash] = DecodedTxLogs(tx=old_dl.tx, raw_logs=raw, decoded_logs=decoded)
+    return sorted(txs.values(), key=lambda dl: (dl.tx.block.number, dl.tx.index))
+
+
 def render_events(renv: RenderingEnv, input: str):
     """Renders the events found in a given input
 
@@ -313,6 +349,26 @@ def render_events(renv: RenderingEnv, input: str):
 
     if input.endswith(".json"):
         decoded_tx_logs = decode_events.decode_from_alchemy_input(json.load(open(input)), renv.chain)
+    elif input.endswith(".yaml"):
+        # Load Subscription list
+        subscriptions_file = yaml.load(open(input), yaml.SafeLoader)
+        ab = address_book.get_default()
+        subscriptions = load_subscriptions(
+            subscriptions_file.get("subscriptions", subscriptions_file.get("hooks", {})), ab
+        )
+        decoded_tx_logs = _consolidate_logs(
+            [
+                decode_events.decode_events_from_subscription(
+                    sub,
+                    renv.w3,
+                    renv.chain,
+                    _block_to_int(renv.w3, renv.args.subscriptions_block_from),
+                    _block_to_int(renv.w3, renv.args.subscriptions_block_to),
+                    renv.args.subscriptions_block_limit,
+                )
+                for sub in subscriptions
+            ]
+        )
     elif input.startswith("0x") and len(input) == 66:
         if renv.w3 is None:
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
@@ -462,7 +518,7 @@ def parse_args(args):
     render_events = subparsers.add_parser("render_events")
     render_events.add_argument(
         "input",
-        metavar="<alchemy-input-json|txhash>",
+        metavar="<alchemy-input-json|txhash|subscription_yaml|block|block_range>",
         type=str,
         help="Alchemy JSON file or TX Transaction",
     )
@@ -472,6 +528,21 @@ def parse_args(args):
         type=str,
         nargs="*",
         help="A list of strings with the different outputs where the logs will be sent",
+    )
+    render_events.add_argument(
+        "--subscriptions-block-from",
+        type=str,
+        help="Block range start (when doing eth_getLogs filter)",
+        default="earliest",
+    )
+    render_events.add_argument(
+        "--subscriptions-block-to", type=str, help="Block range end (when doing eth_getLogs filter)", default="latest"
+    )
+    render_events.add_argument(
+        "--subscriptions-block-limit",
+        type=int,
+        help="Block batch size (when doing eth_getLogs filter)",
+        default=_env_int("GET_LOGS_BLOCK_LIMIT", 500),
     )
 
     flask_dev = subparsers.add_parser("flask_dev")
