@@ -318,8 +318,8 @@ def _consolidate_logs(decoded_logs_for_sub: List[Sequence[DecodedTxLogs]]) -> Se
     Takes a list of sequences of DecodedTxLogs and consolidates them in a new list
     that is ordered by block and transaction index and that has the found logs merged
     """
-    txs = {dl.tx.hash: dl for dl in decoded_logs_for_sub[0]}
-    for decoded_logs in decoded_logs_for_sub[1:]:
+    txs = {}
+    for decoded_logs in decoded_logs_for_sub:
         for decoded_log in decoded_logs:
             tx_hash = decoded_log.tx.hash
             if tx_hash not in txs:
@@ -353,22 +353,40 @@ def render_events(renv: RenderingEnv, input: str):
         # Load Subscription list
         subscriptions_file = yaml.load(open(input), yaml.SafeLoader)
         ab = address_book.get_default()
-        subscriptions = load_subscriptions(
-            subscriptions_file.get("subscriptions", subscriptions_file.get("hooks", {})), ab
+        subscriptions = list(
+            load_subscriptions(subscriptions_file.get("subscriptions", subscriptions_file.get("hooks", {})), ab)
         )
-        decoded_tx_logs = _consolidate_logs(
-            [
-                decode_events.decode_events_from_subscription(
-                    sub,
-                    renv.w3,
-                    renv.chain,
-                    _block_to_int(renv.w3, renv.args.subscriptions_block_from),
-                    _block_to_int(renv.w3, renv.args.subscriptions_block_to),
-                    renv.args.subscriptions_block_limit,
-                )
-                for sub in subscriptions
-            ]
-        )
+
+        resume_file = OptionalResumeFile(renv.args.subscriptions_resume_file)
+
+        block_from = resume_file.get(_block_to_int(renv.w3, renv.args.subscriptions_block_from))
+        block_to = _block_to_int(renv.w3, renv.args.subscriptions_block_to)
+
+        if block_from > block_to:
+            print(f"Block from {block_from} is greater than block to {block_to}, nothing to do")
+            return
+
+        for i in range(block_from, block_to, renv.args.subscriptions_block_limit):
+            batch_start = i
+            batch_end = min(block_to, i + renv.args.subscriptions_block_limit - 1)
+            _logger.info(
+                "Fetching logs in block range %s-%s for %s subscriptions", batch_start, batch_end, len(subscriptions)
+            )
+
+            decoded_tx_logs = _consolidate_logs(
+                [
+                    decode_events.decode_events_from_subscription(sub, renv.w3, renv.chain, batch_start, batch_end)
+                    for sub in subscriptions
+                ]
+            )
+            _logger.info("%s logs found for block range  %s-%s", len(decoded_tx_logs), batch_start, batch_end)
+            if not decoded_tx_logs:
+                continue
+
+            for output in outputs:
+                output.run_sync(decoded_tx_logs)
+            resume_file.set(batch_end)
+        return
     elif input.startswith("0x") and len(input) == 66:
         if renv.w3 is None:
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
@@ -392,6 +410,25 @@ def render_events(renv: RenderingEnv, input: str):
 
     for output in outputs:
         output.run_sync(decoded_tx_logs)
+
+
+class OptionalResumeFile:
+    def __init__(self, filename: str):
+        self.filename = filename
+
+    def get(self, fallback=None) -> int:
+        if self.filename is None:
+            return fallback
+        if not os.path.exists(self.filename):
+            return fallback
+        with open(self.filename, "r") as f:
+            return int(f.read().strip())
+
+    def set(self, block_number: int):
+        if self.filename is None:
+            return
+        with open(self.filename, "w") as f:
+            f.write(f"{block_number + 1}\n")
 
 
 # ---- CLI ----
@@ -543,6 +580,12 @@ def parse_args(args):
         type=int,
         help="Block batch size (when doing eth_getLogs filter)",
         default=_env_int("GET_LOGS_BLOCK_LIMIT", 500),
+    )
+    render_events.add_argument(
+        "--subscriptions-resume-file",
+        type=str,
+        help="File with block to resume from",
+        default=None,
     )
 
     flask_dev = subparsers.add_parser("flask_dev")
