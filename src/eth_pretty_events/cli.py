@@ -390,7 +390,7 @@ def render_events(renv: RenderingEnv, input: str):
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
         block_from, block_to = input.split("-")
         decoded_tx_logs = []
-        block_from = resume.get(_block_to_int(block_from))
+        block_from = resume.get(_block_to_int(renv.w3, block_from))
         for block_number in range(int(block_from), int(block_to) + 1):
             decoded_tx_logs.extend(decode_events.decode_events_from_block(block_number, renv.w3, renv.chain))
     else:
@@ -418,7 +418,7 @@ class OptionalResumeFile:
         with open(self.filename, "w") as f:
             f.write(f"{block_number + 1}\n")
 
-    def wrap(self, logs: Iterable[DecodedTxLogs]) -> Iterable[DecodedTxLogs]:
+    def wrap(self, logs: Iterable[DecodedTxLogs]) -> Iterator[DecodedTxLogs]:
         last_block = None
         for log in logs:
             blk_number = log.tx.block.number
