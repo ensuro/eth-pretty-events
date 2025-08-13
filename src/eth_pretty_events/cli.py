@@ -421,11 +421,10 @@ class OptionalResumeFile:
     def wrap(self, logs: Iterable[DecodedTxLogs]) -> Iterator[DecodedTxLogs]:
         last_block = None
         for log in logs:
-            blk_number = log.tx.block.number
             yield log
-            if last_block is not None and blk_number != last_block:
-                self.set(last_block)
-            last_block = blk_number
+            if log.tx.block.number != last_block:
+                self.set(log.tx.block.number)
+            last_block = log.tx.block.number
 
 
 # ---- CLI ----
