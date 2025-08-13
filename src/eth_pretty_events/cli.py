@@ -422,12 +422,10 @@ class OptionalResumeFile:
         last_block = None
         for log in logs:
             blk_number = log.tx.block.number
+            yield log
             if last_block is not None and blk_number != last_block:
                 self.set(last_block)
-            yield log
             last_block = blk_number
-        if last_block is not None:
-            self.set(last_block)
 
 
 # ---- CLI ----
