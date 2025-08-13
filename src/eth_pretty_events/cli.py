@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import heapq
 import itertools
 import json
 import logging
@@ -7,7 +8,8 @@ import os
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, List, Optional, Sequence, Tuple
+from operator import attrgetter
+from typing import Any, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 import jinja2
 import websockets
@@ -313,30 +315,33 @@ def _block_to_int(w3: Web3, block: str) -> int:
     return w3.eth.get_block(block).number
 
 
-def _consolidate_logs(decoded_logs_for_sub: List[Sequence[DecodedTxLogs]]) -> Sequence[DecodedTxLogs]:
-    """
-    Takes a list of sequences of DecodedTxLogs and consolidates them in a new list
-    that is ordered by block and transaction index and that has the found logs merged
-    """
-    txs = {}
-    for decoded_logs in decoded_logs_for_sub:
-        for decoded_log in decoded_logs:
-            tx_hash = decoded_log.tx.hash
-            if tx_hash not in txs:
-                txs[tx_hash] = decoded_log
-            else:
-                old_dl = txs[tx_hash]
-                old_logs = zip(old_dl.raw_logs, old_dl.decoded_logs)
-                indexes = [x.logIndex for x in old_dl.raw_logs]
-                new_logs = [
-                    x for x in zip(decoded_log.raw_logs, decoded_log.decoded_logs) if x[0]["logIndex"] not in indexes
-                ]
-                if not new_logs:
-                    continue
-                merged_logs = sorted(list(old_logs) + new_logs, key=lambda rd: rd[0]["logIndex"])
-                raw, decoded = zip(*merged_logs)  # unzips
-                txs[tx_hash] = DecodedTxLogs(tx=old_dl.tx, raw_logs=raw, decoded_logs=decoded)
-    return sorted(txs.values(), key=lambda dl: (dl.tx.block.number, dl.tx.index))
+def merge_decoded_logs(same_tx_group: Iterable[DecodedTxLogs]) -> DecodedTxLogs:
+    tx_logs_list = list(same_tx_group)
+    if not tx_logs_list:
+        raise ValueError("merge_decoded_logs() received an empty group")
+
+    base = tx_logs_list[0]
+    by_log_index: dict[int, tuple[object, object]] = {}
+
+    for tx_logs in tx_logs_list:
+        if len(tx_logs.raw_logs) != len(tx_logs.decoded_logs):
+            raise ValueError("raw_logs and decoded_logs must have the same length")
+        for raw, dec in zip(tx_logs.raw_logs, tx_logs.decoded_logs):
+            idx = raw["logIndex"]
+            by_log_index.setdefault(idx, (raw, dec))
+
+    ordered = [by_log_index[i] for i in sorted(by_log_index)]
+    if ordered:
+        raw, dec = zip(*ordered)
+        return DecodedTxLogs(tx=base.tx, raw_logs=list(raw), decoded_logs=list(dec))
+    return DecodedTxLogs(tx=base.tx, raw_logs=[], decoded_logs=[])
+
+
+def _consolidate_logs(decoded_logs_for_sub: Iterable[Iterable[DecodedTxLogs]]) -> Iterator[DecodedTxLogs]:
+    key_fn = attrgetter("tx.block.number", "tx.index")
+    merged = heapq.merge(*(iter(it) for it in decoded_logs_for_sub), key=key_fn)
+    for _, tx_group in itertools.groupby(merged, key=key_fn):
+        yield merge_decoded_logs(tx_group)
 
 
 def render_events(renv: RenderingEnv, input: str):
@@ -346,47 +351,29 @@ def render_events(renv: RenderingEnv, input: str):
       int: Number of events found
     """
     outputs = build_outputs(renv)
-
+    resume = OptionalResumeFile(renv.args.subscriptions_resume_file)
     if input.endswith(".json"):
         decoded_tx_logs = decode_events.decode_from_alchemy_input(json.load(open(input)), renv.chain)
     elif input.endswith(".yaml"):
         # Load Subscription list
         subscriptions_file = yaml.load(open(input), yaml.SafeLoader)
         ab = address_book.get_default()
-        subscriptions = list(
-            load_subscriptions(subscriptions_file.get("subscriptions", subscriptions_file.get("hooks", {})), ab)
+        subscriptions = load_subscriptions(
+            subscriptions_file.get("subscriptions", subscriptions_file.get("hooks", {})), ab
         )
-
-        resume_file = OptionalResumeFile(renv.args.subscriptions_resume_file)
-
-        block_from = resume_file.get(_block_to_int(renv.w3, renv.args.subscriptions_block_from))
-        block_to = _block_to_int(renv.w3, renv.args.subscriptions_block_to)
-
-        if block_from > block_to:
-            print(f"Block from {block_from} is greater than block to {block_to}, nothing to do")
-            return
-
-        for i in range(block_from, block_to, renv.args.subscriptions_block_limit):
-            batch_start = i
-            batch_end = min(block_to, i + renv.args.subscriptions_block_limit - 1)
-            _logger.info(
-                "Fetching logs in block range %s-%s for %s subscriptions", batch_start, batch_end, len(subscriptions)
+        from_block = resume.get(_block_to_int(renv.w3, renv.args.subscriptions_block_from))
+        decoded_tx_logs = _consolidate_logs(
+            (
+                decode_events.decode_events_from_subscription(
+                    sub,
+                    renv.w3,
+                    renv.chain,
+                    from_block,
+                    _block_to_int(renv.w3, renv.args.subscriptions_block_to),
+                )
+                for sub in subscriptions
             )
-
-            decoded_tx_logs = _consolidate_logs(
-                [
-                    decode_events.decode_events_from_subscription(sub, renv.w3, renv.chain, batch_start, batch_end)
-                    for sub in subscriptions
-                ]
-            )
-            _logger.info("%s logs found for block range  %s-%s", len(decoded_tx_logs), batch_start, batch_end)
-            if not decoded_tx_logs:
-                continue
-
-            for output in outputs:
-                output.run_sync(decoded_tx_logs)
-            resume_file.set(batch_end)
-        return
+        )
     elif input.startswith("0x") and len(input) == 66:
         if renv.w3 is None:
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
@@ -403,13 +390,14 @@ def render_events(renv: RenderingEnv, input: str):
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
         block_from, block_to = input.split("-")
         decoded_tx_logs = []
+        block_from = resume.get(_block_to_int(block_from))
         for block_number in range(int(block_from), int(block_to) + 1):
             decoded_tx_logs.extend(decode_events.decode_events_from_block(block_number, renv.w3, renv.chain))
     else:
         raise argparse.ArgumentTypeError(f"Unknown input '{input}'")
 
     for output in outputs:
-        output.run_sync(decoded_tx_logs)
+        output.run_sync(resume.wrap(decoded_tx_logs))
 
 
 class OptionalResumeFile:
@@ -429,6 +417,17 @@ class OptionalResumeFile:
             return
         with open(self.filename, "w") as f:
             f.write(f"{block_number + 1}\n")
+
+    def wrap(self, logs: Iterable[DecodedTxLogs]) -> Iterable[DecodedTxLogs]:
+        last_block = None
+        for log in logs:
+            blk_number = log.tx.block.number
+            if last_block is not None and blk_number != last_block:
+                self.set(last_block)
+            yield log
+            last_block = blk_number
+        if last_block is not None:
+            self.set(last_block)
 
 
 # ---- CLI ----
