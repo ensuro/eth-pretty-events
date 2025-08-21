@@ -125,6 +125,8 @@ ARRAY_TYPE_REGEX = re.compile(r"(.+)\[\]$")
 
 
 def arg_from_solidity_type(type_: str) -> Type:
+    if type_ == "string":
+        return str
     if type_ == "bool":
         return bool
     if ARRAY_TYPE_REGEX.match(type_):

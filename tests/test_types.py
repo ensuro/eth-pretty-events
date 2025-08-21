@@ -11,6 +11,7 @@ ABIS_PATH = os.path.dirname(__file__) / Path("abis")
 
 IERC20_ABI = json.load(open(ABIS_PATH / "ERC/IERC20.json"))["abi"]
 POLICYPOOL_ABI = json.load(open(ABIS_PATH / "ensuro/PolicyPool.json"))["abi"]
+AM_ABI = json.load(open(ABIS_PATH / "openzeppelin/IAccessManager.json"))["abi"]
 
 USDC_ADDR = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
 OTHER_ADDR = "0x3898a4ff6B65D1F8fA89372CfE250d03BE0b2D84"
@@ -68,7 +69,6 @@ def test_args_registry():
     assert types.arg_from_solidity_type("address[]")(address_array) == address_array
     int_array = [1, 2, 3, 4, 5]
     assert types.arg_from_solidity_type("uint256[]")(int_array) == int_array
-    print(types.arg_from_solidity_type("bytes"))
     with pytest.raises(RuntimeError, match="Unsupported type unknown_type"):
         types.arg_from_solidity_type("unknown_type")
 
@@ -186,3 +186,29 @@ def test_event_from_evt_data():
     good_tx = types.Tx(block=block, hash=SOME_HASH, index=123)
     other_evt = types.Event.from_event_data(evt_data, transfer_nt_type, block, tx=good_tx)
     assert other_evt.tx is good_tx
+
+
+def test_event_with_string():
+    role_label_evt = _get_event(AM_ABI, "RoleLabel")
+    label_nt_type = types.make_abi_namedtuple("RoleLabel", role_label_evt["inputs"])
+    chain = types.Chain(id=137, name="Polygon")
+
+    block = types.Block(
+        chain=chain,
+        number=63995699,
+        hash="0x65c9551dd699d24b8a927b2c41a4e9dece9e4de6e9a620d26701c0b1ea999eb0",
+        timestamp=1730986025,
+    )
+
+    evt_data = {
+        "transactionHash": HexBytes("0x1fb23d4c22a61b82c5f38479ae2f8e3b09f69ce9531aaa855968c307b2830d59"),
+        "transactionIndex": 37,
+        "address": HexBytes("0x52050109459781DaF99C2a63c6ED15D5ABDbc4c0"),
+        "logIndex": 233,
+        "event": "RoleLabel",
+        "args": {"roleId": 201, "label": "SPO_BRIDGE23"},
+    }
+
+    evt = types.Event.from_event_data(evt_data, label_nt_type, block)
+    assert evt.args.roleId == 201
+    assert evt.args.label == "SPO_BRIDGE23"
