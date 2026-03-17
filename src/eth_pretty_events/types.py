@@ -186,6 +186,16 @@ class NamedTupleDictMixin:
 
 class ABITupleMixin(NamedTupleDictMixin):
 
+    def _asdict(self) -> dict:
+        def transform(value):
+            if hasattr(value, "_asdict"):
+                return value._asdict()
+            if isinstance(value, (list, tuple)):
+                return [transform(item) for item in value]
+            return value
+
+        return {field: transform(getattr(self, field)) for field in self._fields}
+
     @classmethod
     def from_args(cls: Type[ArgsTuple], args) -> ArgsTuple:
         field_values = []

@@ -137,6 +137,10 @@ def test_make_abi_namedtuple():
     )
     assert new_policy_nt.policy.jrCoc == 10
 
+    result = new_policy_nt._asdict()
+    assert isinstance(result, dict)
+    assert isinstance(result["policy"], dict)
+
 
 def test_make_abi_namedtuple_with_underscore():
     transfer = _get_event(TRANSFER_WITH_UNDERSCORE, "Transfer")
