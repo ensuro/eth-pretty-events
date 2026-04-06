@@ -10,7 +10,7 @@ from web3 import Web3
 from web3.exceptions import ExtraDataLengthError
 from web3.middleware import ExtraDataToPOAMiddleware
 
-from eth_pretty_events import address_book
+from eth_pretty_events import address_book, decode_events
 from eth_pretty_events.cli import (
     _env_alchemy_keys,
     _env_globals,
@@ -20,11 +20,16 @@ from eth_pretty_events.cli import (
     _setup_web3,
     load_events,
     main,
+    render_events,
 )
+from eth_pretty_events.types import Chain
 
 __author__ = "Guillermo M. Narvaja"
 __copyright__ = "Guillermo M. Narvaja"
 __license__ = "MIT"
+
+TX_HASH_1 = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+TX_HASH_2 = "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
 
 
 def _make_nt(**kwargs):
@@ -273,3 +278,74 @@ def test_load_alchemy_keys():
         _env_alchemy_keys({"ALCHEMY_WEBHOOK_MYKEY1_ID": "wh_6kmi7uom6hn97voi"})
 
     assert _env_alchemy_keys({"SOME_VARIABLE": "foobar"}) == {}
+
+
+@pytest.fixture
+def txt_file(tmp_path, request):
+    file_types = {
+        "with_hashes": f"{TX_HASH_1}\n{TX_HASH_2}\n",
+        "with_whitespace": f"  {TX_HASH_1}  \n\t{TX_HASH_2}\t\n",
+        "with_empty_lines": f"{TX_HASH_1}\n\n{TX_HASH_2}\n\n",
+        "empty": "",
+        "only_whitespace": "   \n\t\n   \t\n",
+        "crlf": f"{TX_HASH_1}\r\n{TX_HASH_2}\r\n",
+    }
+    file_path = tmp_path / f"{request.param}.txt"
+    file_type = file_types[request.param]
+    if request.param == "crlf":
+        file_path.write_bytes(file_type.encode())
+    else:
+        file_path.write_text(file_type)
+    return file_path
+
+
+@pytest.fixture
+def mock_renv(mock_web3):
+    renv = MagicMock()
+    renv.w3 = mock_web3
+    renv.chain = Chain(id=11155111, name="Sepolia")
+    return renv
+
+
+@pytest.mark.parametrize("txt_file", ["with_hashes", "with_whitespace", "with_empty_lines", "crlf"], indirect=True)
+def test_render_events_txt_file_parses_hashes(mock_renv, txt_file):
+    with patch.object(decode_events, "decode_events_from_tx", return_value=MagicMock()) as mock_decode:
+        render_events(mock_renv, str(txt_file))
+
+        assert mock_decode.call_count == 2
+        mock_decode.assert_any_call(TX_HASH_1, mock_renv.w3, mock_renv.chain)
+        mock_decode.assert_any_call(TX_HASH_2, mock_renv.w3, mock_renv.chain)
+
+
+@pytest.mark.parametrize("txt_file", ["empty", "only_whitespace"], indirect=True)
+def test_render_events_txt_file_ignores_empty_content(mock_renv, txt_file):
+    with patch.object(decode_events, "decode_events_from_tx", return_value=MagicMock()) as mock_decode:
+        render_events(mock_renv, str(txt_file))
+        mock_decode.assert_not_called()
+
+
+def test_render_events_txt_file_without_rpc_url(tmp_path):
+    file_path = tmp_path / "tx_hashes.txt"
+    file_path.write_text(f"{TX_HASH_1}\n{TX_HASH_2}\n")
+
+    mock_renv = MagicMock()
+    mock_renv.w3 = None
+
+    with pytest.raises(argparse.ArgumentTypeError, match="Missing --rpc-url parameter"):
+        render_events(mock_renv, str(file_path))
+
+
+def test_render_events_txt_file_not_found(mock_renv):
+    with pytest.raises(FileNotFoundError):
+        render_events(mock_renv, "/nonexistent/path/tx_hashes.txt")
+
+
+def test_render_events_txt_file_tx_not_found(mock_renv, tmp_path):
+    from web3.exceptions import TransactionNotFound
+
+    file_path = tmp_path / "tx_hashes.txt"
+    file_path.write_text(f"{TX_HASH_1}\n{TX_HASH_2}\n")
+
+    with patch.object(decode_events, "decode_events_from_tx", side_effect=TransactionNotFound(TX_HASH_1)):
+        with pytest.raises(TransactionNotFound):
+            render_events(mock_renv, str(file_path))

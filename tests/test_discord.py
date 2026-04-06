@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
 import pytest
+import pytest_asyncio
 import requests
 from aiohttp import web
 from jinja2 import Environment, FunctionLoader
@@ -111,7 +112,7 @@ def alchemy_sample_events(mock_tx):
     ]
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def setup_output(aiohttp_client, dummy_renv, template_rules, template_loader):
     dummy_renv.template_rules = template_rules
     dummy_renv.jinja_env = Environment(loader=FunctionLoader(template_loader))
@@ -166,7 +167,7 @@ def test_build_transaction_messages_limits(dummy_renv, template_rules, template_
 
 @pytest.mark.asyncio
 async def test_run_webhook_response(setup_output, alchemy_sample_events, mock_tx):
-    output, queue, app = await setup_output
+    output, queue, app = setup_output
     raw_logs = [{} for _ in alchemy_sample_events]  # Not used in this test, just needs to be the same length
     decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs, decoded_logs=alchemy_sample_events)
     task = asyncio.create_task(output.run(queue))
@@ -352,7 +353,7 @@ def test_build_transaction_messages_none_events(dummy_renv, mock_tx):
 
 @pytest.mark.asyncio
 async def test_send_to_output_sync_not_implemented(setup_output, mock_tx):
-    output, queue, _ = await setup_output
+    output, queue, _ = setup_output
 
     decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[], decoded_logs=[])
 

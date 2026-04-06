@@ -390,6 +390,14 @@ def render_events(renv: RenderingEnv, input: str):
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
         # It's a transaction hash
         decoded_tx_logs = [decode_events.decode_events_from_tx(input, renv.w3, renv.chain)]
+    elif input.endswith(".txt"):
+        if renv.w3 is None:
+            raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
+        with open(input) as f:
+            tx_hashes = (line.strip() for line in f if line.strip())
+            decoded_tx_logs = [
+                decode_events.decode_events_from_tx(tx_hash, renv.w3, renv.chain) for tx_hash in tx_hashes
+            ]
     elif input.isdigit():
         if renv.w3 is None:
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
@@ -564,9 +572,12 @@ def parse_args(args):
     render_events = subparsers.add_parser("render_events")
     render_events.add_argument(
         "input",
-        metavar="<alchemy-input-json|txhash|subscription_yaml|block|block_range>",
+        metavar="<alchemy-input-json|txhash|txt_file|subscription_yaml|block|block_range>",
         type=str,
-        help="Alchemy JSON file or TX Transaction",
+        help=(
+            "Alchemy JSON file, TX Transaction, txt file with tx hashes, "
+            "subscription YAML, block number or block range"
+        ),
     )
 
     render_events.add_argument(
