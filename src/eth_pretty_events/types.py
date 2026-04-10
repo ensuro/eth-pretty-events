@@ -119,6 +119,28 @@ class Event:
         return Hash(event_abi_to_log_topic({"inputs": self.args._components, "name": self.name, "type": "event"}))
 
 
+_DecodeArgsError = namedtuple("DecodeErrorArgs", ["topic", "log_index", "address", "error"])
+
+
+@dataclass
+class DecodeEventError:
+    topic: str
+    log_index: int
+    address: Address
+    tx: Tx
+    error: str
+    name: str = "DECODE ERROR"
+
+    @property
+    def args(self) -> _DecodeArgsError:
+        return _DecodeArgsError(
+            topic=self.topic,
+            log_index=self.log_index,
+            address=str(self.address),
+            error=self.error,
+        )
+
+
 INT_TYPE_REGEX = re.compile(r"int\d+|uint\d+")
 BYTES_TYPE_REGEX = re.compile(r"bytes\d+")
 ARRAY_TYPE_REGEX = re.compile(r"(.+)\[\]$")

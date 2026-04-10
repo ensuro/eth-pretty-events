@@ -3,4 +3,6 @@
 **TX:** {{ evt.tx.hash | tx_link }}
 **Block:** {{ evt.tx.block.number | block_link }}
 **Contract:** {{ evt.address | address_link }}
-**Log Index:** {{ evt.log_index }}
+**Log Index:** {{ evt.log_index }}{% if evt.args.topic %}
+**Topic:** `{{ evt.args.topic }}`{% endif %}{% if evt.args.error %}
+**Error:** {{ evt.args.error }}{% endif %}

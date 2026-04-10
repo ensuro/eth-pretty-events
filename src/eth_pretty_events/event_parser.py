@@ -13,7 +13,7 @@ from web3._utils.events import get_event_data
 from web3.exceptions import LogTopicError
 from web3.types import LogReceipt
 
-from .types import ArgsTuple, Block, Event, Tx, make_abi_namedtuple
+from .types import ArgsTuple, Block, DecodeEventError, Event, Tx, make_abi_namedtuple
 
 logger = logging.getLogger(__name__)
 
@@ -97,9 +97,15 @@ class EventDefinition:
         event = cls._registry[topic]
         try:
             return event.get_event_data(log_entry, block, tx)
-        except RuntimeError as e:
+        except (RuntimeError, LogTopicError) as e:
             logger.exception("Failed to decode log for topic %s in log entry: %s, Error: %s", topic, log_entry, e)
-            return None
+            return DecodeEventError(
+                topic=topic,
+                log_index=log_entry.get("logIndex"),
+                address=log_entry.get("address"),
+                tx=tx,
+                error=str(e),
+            )
 
     @classmethod
     def abi_codec(cls):
