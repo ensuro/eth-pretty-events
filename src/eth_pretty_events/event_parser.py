@@ -97,8 +97,8 @@ class EventDefinition:
         event = cls._registry[topic]
         try:
             return event.get_event_data(log_entry, block, tx)
-        except (RuntimeError, LogTopicError) as e:
-            logger.exception("Failed to decode log for topic %s in log entry: %s, Error: %s", topic, log_entry, e)
+        except LogTopicError as e:
+            logger.warning("Failed to decode log for topic %s in log entry: %s, Error: %s", topic, log_entry, e)
             return DecodeEventError(
                 topic=topic,
                 log_index=log_entry.get("logIndex"),
@@ -106,6 +106,11 @@ class EventDefinition:
                 tx=tx,
                 error=str(e),
             )
+        except Exception as e:
+            logger.exception(
+                "Unexpected error decoding log for topic %s in log entry: %s, Error: %s", topic, log_entry, e
+            )
+            return None
 
     @classmethod
     def abi_codec(cls):

@@ -6,6 +6,7 @@ from google.cloud import pubsub_v1
 from web3._utils.encoding import Web3JsonEncoder
 
 from .outputs import DecodedTxLogs, OutputBase
+from .types import DecodeEventError
 
 _logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ class PubSubDecodedLogsOutput(PubSubOutputBase):
                     "abi": decoded_log.args._components,
                 }
                 for decoded_log in log.decoded_logs
-                if decoded_log
+                if decoded_log and not isinstance(decoded_log, DecodeEventError)
             ],
         }
         self.publish_message(message)
