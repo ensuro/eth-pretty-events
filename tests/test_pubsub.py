@@ -11,7 +11,15 @@ from eth_pretty_events.pubsub import (
     PubSubDecodedLogsOutput,
     PubSubRawLogsOutput,
 )
-from eth_pretty_events.types import Block, Chain, Event, Hash, Tx, make_abi_namedtuple
+from eth_pretty_events.types import (
+    Block,
+    Chain,
+    DecodeEventError,
+    Event,
+    Hash,
+    Tx,
+    make_abi_namedtuple,
+)
 
 
 @pytest.fixture
@@ -336,3 +344,81 @@ def test_print_to_screen_publisher_non_byte_message(caplog):
         publisher.publish(topic_path, message)
         assert "Publishing to projects/test_project/topics/test_topic:" in caplog.text
         assert str(message) in caplog.text
+
+
+def test_pubsub_decoded_logs_output_filters_decode_error(dummy_renv, caplog):
+    url = urlparse("pubsubdecodedlogs://?project_id=test_project&topic=test_topic&dry_run=true")
+    output = PubSubDecodedLogsOutput(url, dummy_renv)
+
+    abi_components = [
+        {"name": "from_", "type": "address"},
+        {"name": "to", "type": "address"},
+        {"name": "value", "type": "uint256"},
+    ]
+    Args = make_abi_namedtuple("Transfer", abi_components)
+    args = Args(
+        from_="0x742d35cc6634c0532925a3b844bc454e4438f44e",
+        to="0xde0b295669a9fd93d5f28d9ec85e40f4cb697bae",
+        value=1000,
+    )
+
+    decoded_event = Event(
+        address="0x742d35cc6634c0532925a3b844bc454e4438f44e",
+        args=args,
+        tx=None,
+        name="Transfer",
+        log_index=10,
+    )
+
+    tx = Tx(
+        hash=Hash("0x4c0883a6910395bae0f94c2e1d2c37bd2e8d6c5797b7c3f8d36dd05e5f13606f"),
+        index=0,
+        block=Block(
+            hash=Hash("0x5d7c5e1ce2f3410de4c99f172ddfcb087a821440134d25e7ab8353ce57e770cc"),
+            timestamp=1635600000,
+            number=123456,
+            chain=Chain(id=1, name="Ethereum Mainnet"),
+        ),
+    )
+
+    decode_error = DecodeEventError(
+        topic="0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        log_index=5,
+        address="0x742d35cc6634c0532925a3b844bc454e4438f44e",
+        tx=tx,
+        error="LogTopicError: Unable to decode",
+    )
+
+    log = DecodedTxLogs(tx=tx, raw_logs=[], decoded_logs=[decoded_event, decode_error])
+
+    with caplog.at_level("INFO"):
+        asyncio.run(output.send_to_output(log))
+
+    expected_message = {
+        "transactionHash": "0x4c0883a6910395bae0f94c2e1d2c37bd2e8d6c5797b7c3f8d36dd05e5f13606f",
+        "blockHash": "0x5d7c5e1ce2f3410de4c99f172ddfcb087a821440134d25e7ab8353ce57e770cc",
+        "blockNumber": 123456,
+        "blockTimestamp": 1635600000,
+        "chainId": 1,
+        "transactionIndex": 0,
+        "decodedLogs": [
+            {
+                "name": "Transfer",
+                "address": "0x742d35cc6634c0532925a3b844bc454e4438f44e",
+                "logIndex": 10,
+                "args": {
+                    "from_": "0x742d35cc6634c0532925a3b844bc454e4438f44e",
+                    "to": "0xde0b295669a9fd93d5f28d9ec85e40f4cb697bae",
+                    "value": 1000,
+                },
+                "abi": [
+                    {"name": "from_", "type": "address"},
+                    {"name": "to", "type": "address"},
+                    {"name": "value", "type": "uint256"},
+                ],
+            }
+        ],
+    }
+
+    assert "[Dry Run] Publishing to" in caplog.text
+    assert json.dumps(expected_message, indent=2) in caplog.text

@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from hexbytes import HexBytes
@@ -242,3 +243,34 @@ def test_read_log_return_none(log_entry, expected_result):
     result = EventDefinition.read_log(log_entry, block)
 
     assert result == expected_result
+
+
+def test_read_log_unexpected_error_returns_none():
+    chain = Chain(id=137, name="Polygon")
+    block = Block(
+        chain=chain,
+        number=34530281,
+        hash="0x81145f3e891ab54554d964f901f122635ba4b00e22066157c6cabb647f959506",
+        timestamp=1666168181,
+    )
+
+    EventDefinition._registry = {}
+    EventDefinition._registry["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"] = "fake_event"
+
+    log_entry = {
+        "address": "0x9aa7fEc87CA69695Dd1f879567CcF49F3ba417E2",
+        "blockHash": "0x81145f3e891ab54554d964f901f122635ba4b00e22066157c6cabb647f959506",
+        "blockNumber": 34530281,
+        "data": "0x00000000000000000000000000000000000000000000000000000002540be400",
+        "logIndex": 2,
+        "removed": False,
+        "topics": [
+            HexBytes("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"),
+        ],
+        "transactionHash": "0x37a50ac80e26cbf0005469713177e3885800188d80b92134f150685e931aa4bf",
+        "transactionIndex": 1,
+    }
+
+    with patch.object(EventDefinition, "get_event_data", side_effect=ValueError("Unexpected error")):
+        result = EventDefinition.read_log(log_entry, block)
+        assert result is None
