@@ -31,6 +31,7 @@ def decode_from_alchemy_input(alchemy_input: dict, chain: Chain) -> Iterable[Dec
             hash=Hash(tx_hash),
             index=tx_index,
         )
+        alchemy_logs = list({log["index"]: log for log in alchemy_logs}.values())
         raw_logs = [graphql_log_to_log_receipt(alchemy_log, alchemy_block) for alchemy_log in alchemy_logs]
         decoded_logs = decode_events_from_raw_logs(block, tx, raw_logs)
 

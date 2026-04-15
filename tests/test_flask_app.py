@@ -11,6 +11,7 @@ from eth_pretty_events import jinja2_ext
 from eth_pretty_events.address_book import AddrToNameAddressBook
 from eth_pretty_events.address_book import setup_default as setup_addr_book
 from eth_pretty_events.cli import RenderingEnv
+from eth_pretty_events.decode_events import decode_from_alchemy_input
 from eth_pretty_events.event_filter import read_template_rules
 from eth_pretty_events.event_parser import EventDefinition
 from eth_pretty_events.flask_app import app
@@ -194,3 +195,15 @@ def test_alchemy_webhook_with_failed_messages(test_client, renv):
         )
         assert response.status_code == 200
         assert response.json == {"status": "OK", "ok_count": 0, "failed_count": 1}
+
+
+def test_alchemy_webhook_deduplicates_logs(renv):
+
+    with open("samples/alchemy-sample-with-dups.json") as f:
+        payload = json.load(f)
+
+    chain = factories.Chain()
+    results = list(decode_from_alchemy_input(payload, chain))
+
+    all_log_indexes = [(str(r.tx.hash), log["logIndex"]) for r in results for log in r.raw_logs]
+    assert len(all_log_indexes) == len(set(all_log_indexes)), "There should be no duplicate logs"
