@@ -198,12 +198,16 @@ def test_alchemy_webhook_with_failed_messages(test_client, renv):
 
 
 def test_alchemy_webhook_deduplicates_logs(renv):
-
     with open("samples/alchemy-sample-with-dups.json") as f:
         payload = json.load(f)
 
     chain = factories.Chain()
     results = list(decode_from_alchemy_input(payload, chain))
 
-    all_log_indexes = [(str(r.tx.hash), log["logIndex"]) for r in results for log in r.raw_logs]
-    assert len(all_log_indexes) == len(set(all_log_indexes)), "There should be no duplicate logs"
+    total_logs_in_payload = len(payload["event"]["data"]["block"]["logs"])
+    total_logs_processed = sum(len(r.raw_logs) for r in results)
+
+    assert total_logs_in_payload - total_logs_processed == 1, (
+        f"Expected 1 duplicate to be removed: {total_logs_in_payload} - {total_logs_processed} = "
+        f"{total_logs_in_payload - total_logs_processed}"
+    )
