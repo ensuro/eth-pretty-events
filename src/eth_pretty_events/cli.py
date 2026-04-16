@@ -228,6 +228,7 @@ async def parse_raw_events(
 
         for tx_hash, tx_logs in itertools.groupby(logs, key=lambda x: x["transactionHash"]):
             tx_logs = list(tx_logs)
+            tx_logs = list({log["logIndex"]: log for log in tx_logs}.values())
             tx = Tx(Hash(tx_hash), tx_logs[0]["transactionIndex"], block)
             decoded_events = list(decode_events.decode_events_from_raw_logs(block, tx, tx_logs))
             decoded_log = DecodedTxLogs(tx, tx_logs, decoded_events)
