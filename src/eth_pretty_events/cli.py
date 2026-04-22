@@ -28,7 +28,7 @@ try:
     from . import pubsub  # noqa - To load the pubsub output
 except ImportError:
     pass
-from . import __version__, address_book, decode_events, render
+from . import __version__, address_book, decode_events, render, w3cache
 from .block_tree import BlockTree
 from .event_filter import TemplateRule, read_template_rules
 from .event_parser import EventDefinition
@@ -395,10 +395,12 @@ def render_events(renv: RenderingEnv, input: str):
         if renv.w3 is None:
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
         with open(input) as f:
-            tx_hashes = (line.strip() for line in f if line.strip())
-            decoded_tx_logs = [
-                decode_events.decode_events_from_tx(tx_hash, renv.w3, renv.chain) for tx_hash in tx_hashes
-            ]
+            tx_hashes = [line.strip() for line in f if line.strip()]
+        w3cache_instance = w3cache.W3Cache(renv.w3)
+        w3cache_instance.preload_receipts(tx_hashes)
+        decoded_tx_logs = [
+            decode_events.decode_events_from_tx(tx_hash, w3cache_instance, renv.chain) for tx_hash in tx_hashes
+        ]
     elif input.isdigit():
         if renv.w3 is None:
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
