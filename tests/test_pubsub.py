@@ -87,7 +87,7 @@ def test_pubsub_raw_logs_output_with_dry_run(dummy_renv, caplog):
             "logIndex": 0,
         }
     ]
-    log = DecodedTxLogs(tx=tx, raw_logs=raw_logs, decoded_logs=[])
+    log = DecodedTxLogs(tx=tx, raw_logs=raw_logs)
 
     with caplog.at_level("INFO"):
         asyncio.run(output.send_to_output(log))
@@ -144,7 +144,7 @@ def test_pubsub_raw_logs_output_production(dummy_renv, mock_future):
                 "logIndex": 0,
             }
         ]
-        log = DecodedTxLogs(tx=tx, raw_logs=raw_logs, decoded_logs=[])
+        log = DecodedTxLogs(tx=tx, raw_logs=raw_logs)
 
         mock_publisher_instance.publish.return_value = mock_future()
 
@@ -210,7 +210,8 @@ def test_pubsub_decoded_logs_output_with_dry_run(dummy_renv, caplog):
             chain=Chain(id=1, name="Ethereum Mainnet"),
         ),
     )
-    log = DecodedTxLogs(tx=tx, raw_logs=[], decoded_logs=[decoded_event])
+    log = DecodedTxLogs(tx=tx, raw_logs=[])
+    log.decoded_logs = [decoded_event]
 
     with caplog.at_level("INFO"):
         asyncio.run(output.send_to_output(log))
@@ -287,7 +288,8 @@ def test_pubsub_decoded_logs_output_production(dummy_renv, mock_future):
                 chain=Chain(id=1, name="Ethereum Mainnet"),
             ),
         )
-        log = DecodedTxLogs(tx=tx, raw_logs=[], decoded_logs=[decoded_event])
+        log = DecodedTxLogs(tx=tx, raw_logs=[])
+        log.decoded_logs = [decoded_event]
 
         mock_publisher_instance.publish.return_value = mock_future()
 
@@ -389,7 +391,8 @@ def test_pubsub_decoded_logs_output_filters_decode_error(dummy_renv, caplog):
         error="LogTopicError: Unable to decode",
     )
 
-    log = DecodedTxLogs(tx=tx, raw_logs=[], decoded_logs=[decoded_event, decode_error])
+    log = DecodedTxLogs(tx=tx, raw_logs=[])
+    log.decoded_logs = [decoded_event, decode_error]
 
     with caplog.at_level("INFO"):
         asyncio.run(output.send_to_output(log))
