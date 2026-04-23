@@ -88,42 +88,60 @@ class TestW3Cache:
     def test_preload_receipts_with_batch_requests(self):
         mock_w3 = MagicMock()
         receipt1 = MagicMock(transactionHash=TX_HASH_1.lower())
+        receipt1.blockNumber = 100
         receipt2 = MagicMock(transactionHash=TX_HASH_2.lower())
-        mock_batch = MagicMock()
-        mock_batch.execute.return_value = [receipt1, receipt2]
-        mock_w3.batch_requests.return_value = mock_batch
+        receipt2.blockNumber = 101
+
+        receipt_batch = MagicMock()
+        receipt_batch.execute.return_value = [receipt1, receipt2]
+
+        block1 = MagicMock()
+        block1.number = 100
+        block2 = MagicMock()
+        block2.number = 101
+        block_batch = MagicMock()
+        block_batch.execute.return_value = [block1, block2]
+
+        mock_w3.batch_requests.side_effect = [receipt_batch, block_batch]
 
         cache = W3Cache(mock_w3)
         cache.preload_receipts([TX_HASH_1, TX_HASH_2])
 
-        assert mock_w3.batch_requests.call_count == 1
-        mock_batch.add_mapping.assert_called_once()
-        assert mock_batch.execute.call_count == 1
+        assert mock_w3.batch_requests.call_count == 2
         assert TX_HASH_1.lower() in cache._receipt_cache
         assert TX_HASH_2.lower() in cache._receipt_cache
+        assert 100 in cache._block_cache
+        assert 101 in cache._block_cache
 
     def test_preload_receipts_skips_cached(self):
         mock_w3 = MagicMock()
         receipt1 = MagicMock(transactionHash=TX_HASH_1.lower())
+        receipt1.blockNumber = 100
         receipt2 = MagicMock(transactionHash=TX_HASH_2.lower())
-        mock_batch = MagicMock()
-        mock_batch.execute.return_value = [receipt2]
-        mock_w3.batch_requests.return_value = mock_batch
+        receipt2.blockNumber = 101
+
+        receipt_batch = MagicMock()
+        receipt_batch.execute.return_value = [receipt2]
+
+        block_batch = MagicMock()
+        block_batch.execute.return_value = []
+
+        mock_w3.batch_requests.side_effect = [receipt_batch, block_batch]
 
         cache = W3Cache(mock_w3)
         cache._receipt_cache[TX_HASH_1.lower()] = receipt1
 
         cache.preload_receipts([TX_HASH_1, TX_HASH_2])
 
-        call_args = mock_batch.add_mapping.call_args[0][0]
-        assert TX_HASH_1.lower() not in call_args[mock_w3.eth.get_transaction_receipt]
-        assert TX_HASH_2.lower() in call_args[mock_w3.eth.get_transaction_receipt]
+        assert TX_HASH_2.lower() in cache._receipt_cache
+        assert TX_HASH_1.lower() not in receipt_batch.add_mapping.call_args[0][0][mock_w3.eth.get_transaction_receipt]
 
     def test_preload_receipts_batching(self):
         mock_w3 = MagicMock()
         receipts = [MagicMock() for i in range(60)]
         for i, r in enumerate(receipts):
             r.transactionHash = f"0x{i:064d}"
+            r.blockNumber = i % 3
 
         batches = []
         for i in range(0, 60, 50):
@@ -133,7 +151,20 @@ class TestW3Cache:
 
         mock_w3.batch_requests.side_effect = iter(batches)
 
+        block_batches = []
+        for i in range(0, 3, 50):
+            block_batch = MagicMock()
+            block_data = []
+            for j in range(i, min(i + 50, 3)):
+                b = MagicMock()
+                b.number = j
+                block_data.append(b)
+            block_batch.execute.return_value = block_data
+            block_batches.append(block_batch)
+
+        mock_w3.batch_requests.side_effect = iter(batches + block_batches)
+
         cache = W3Cache(mock_w3)
         cache.preload_receipts([r.transactionHash for r in receipts])
 
-        assert mock_w3.batch_requests.call_count == 2
+        assert mock_w3.batch_requests.call_count == 3

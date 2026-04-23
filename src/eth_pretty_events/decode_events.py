@@ -50,11 +50,13 @@ def decode_events_from_block(block_number: int, w3: Web3, chain: Chain) -> Itera
     w3_block = w3.eth.get_block(block_number)
     block = Block(chain=chain, number=block_number, timestamp=w3_block["timestamp"], hash=Hash(w3_block["hash"]))
 
-    for w3_tx in w3_block.transactions:
-        tx_hash = Hash(w3_tx)
-        receipt = w3.eth.get_transaction_receipt(w3_tx)
-        tx = Tx(block=block, hash=tx_hash, index=receipt.transactionIndex)
-        yield DecodedTxLogs(tx=tx, raw_logs=receipt.logs)
+    tx_hashes = [str(tx) for tx in w3_block.transactions]
+    if tx_hashes:
+        batch = w3.batch_requests()
+        batch.add_mapping({w3.eth.get_transaction_receipt: tx_hashes})
+        for tx_hash, receipt in zip(tx_hashes, batch.execute()):
+            tx = Tx(block=block, hash=Hash(tx_hash), index=receipt.transactionIndex)
+            yield DecodedTxLogs(tx=tx, raw_logs=receipt.logs)
 
 
 def decode_events_from_subscription(subscription, w3: Web3, chain: Chain, block_from: int, block_to: int):

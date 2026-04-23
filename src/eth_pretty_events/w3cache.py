@@ -51,3 +51,20 @@ class W3Cache:
             )
             for receipt in batch.execute():
                 self._receipt_cache[receipt.transactionHash.lower()] = receipt
+
+        uncached_blocks = {
+            receipt.blockNumber
+            for receipt in self._receipt_cache.values()
+            if receipt.blockNumber is not None and receipt.blockNumber not in self._block_cache
+        }
+        if uncached_blocks:
+            block_list = sorted(uncached_blocks)
+            for i in range(0, len(block_list), batch_size):
+                batch = self._w3.batch_requests()
+                batch.add_mapping(
+                    {
+                        self._w3.eth.get_block: block_list[i : i + batch_size],
+                    }
+                )
+                for block in batch.execute():
+                    self._block_cache[block.number] = block
