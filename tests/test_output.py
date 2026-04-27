@@ -45,8 +45,7 @@ def test_dummyoutput_send_to_output(dummy_output):
             }
         )
     ]
-    decoded_logs = ["decoded_event"]
-    decoded_tx_logs = DecodedTxLogs(tx=tx, raw_logs=raw_logs, decoded_logs=decoded_logs)
+    decoded_tx_logs = DecodedTxLogs(tx=tx, raw_logs=raw_logs)
 
     with patch("pprint.pprint") as mock_pprint:
         asyncio.run(dummy_output.send_to_output(decoded_tx_logs))
@@ -64,8 +63,7 @@ def test_dummyoutput_send_to_output_sync(dummy_output):
             }
         )
     ]
-    decoded_logs = ["decoded_event"]
-    decoded_tx_logs = DecodedTxLogs(tx=tx, raw_logs=raw_logs, decoded_logs=decoded_logs)
+    decoded_tx_logs = DecodedTxLogs(tx=tx, raw_logs=raw_logs)
 
     with patch("pprint.pprint") as mock_pprint:
         dummy_output.send_to_output_sync(decoded_tx_logs)
@@ -74,9 +72,9 @@ def test_dummyoutput_send_to_output_sync(dummy_output):
 
 def test_outputbase_run(dummy_output, queue):
     tx1 = Tx(block=None, hash=Hash("0xd77c733e1884cd516c042549861c93cad8b998f691c38682c6100d7872761d4a"), index=1)
-    decoded_tx_logs1 = DecodedTxLogs(tx=tx1, raw_logs=[], decoded_logs=[])
+    decoded_tx_logs1 = DecodedTxLogs(tx=tx1, raw_logs=[])
     tx2 = Tx(block=None, hash=Hash("0x4a76712bb2be112fd59f3a4f285dbc3c4b39914f557e5e336cf95b3cf4545328"), index=2)
-    decoded_tx_logs2 = DecodedTxLogs(tx=tx2, raw_logs=[], decoded_logs=[])
+    decoded_tx_logs2 = DecodedTxLogs(tx=tx2, raw_logs=[])
 
     asyncio.run(queue.put(decoded_tx_logs1))
     asyncio.run(queue.put(decoded_tx_logs2))
@@ -98,9 +96,9 @@ def test_outputbase_run(dummy_output, queue):
 
 def test_outputbase_run_sync(dummy_output):
     tx1 = Tx(block=None, hash=Hash("0xd77c733e1884cd516c042549861c93cad8b998f691c38682c6100d7872761d4a"), index=1)
-    decoded_tx_logs1 = DecodedTxLogs(tx=tx1, raw_logs=[], decoded_logs=[])
+    decoded_tx_logs1 = DecodedTxLogs(tx=tx1, raw_logs=[])
     tx2 = Tx(block=None, hash=Hash("0x4a76712bb2be112fd59f3a4f285dbc3c4b39914f557e5e336cf95b3cf4545328"), index=2)
-    decoded_tx_logs2 = DecodedTxLogs(tx=tx2, raw_logs=[], decoded_logs=[])
+    decoded_tx_logs2 = DecodedTxLogs(tx=tx2, raw_logs=[])
 
     logs = [decoded_tx_logs1, decoded_tx_logs2]
 

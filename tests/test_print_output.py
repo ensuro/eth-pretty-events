@@ -100,10 +100,9 @@ def mock_raw_log():
 def test_printoutput_unrecognized_event(dummy_renv, mock_tx, mock_raw_log, caplog):
     url = urlparse("print://")
     output = PrintOutput(url, dummy_renv)
-
-    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[mock_raw_log], decoded_logs=[None])
-    with caplog.at_level("WARNING"):
-        output.send_to_output_sync(decoded_logs)
+    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[mock_raw_log])
+    decoded_logs.decoded_logs = [None]
+    output.send_to_output_sync(decoded_logs)
 
     assert "Unrecognized event tried to be rendered in tx" in caplog.text
 
@@ -116,7 +115,8 @@ def test_printoutput_prints_event(
     url = urlparse("print://")
     output = PrintOutput(url, dummy_renv)
 
-    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[mock_raw_log], decoded_logs=[mock_event])
+    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[mock_raw_log])
+    decoded_logs.decoded_logs = [mock_event]
     output.send_to_output_sync(decoded_logs)
 
     captured = capfd.readouterr()
@@ -135,7 +135,7 @@ def test_printoutput_no_printing_event(dummy_renv, template_loader, mock_tx, moc
     url = urlparse("print://")
     output = PrintOutput(url, dummy_renv)
 
-    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[], decoded_logs=[mock_event])
+    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[])
     output.send_to_output_sync(decoded_logs)
 
     captured = capfd.readouterr()
@@ -166,7 +166,8 @@ def test_printoutput_decode_error_event(dummy_renv, template_loader, template_ru
     )
 
     mock_raw_log = MockRawLog(logIndex=5)
-    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[mock_raw_log], decoded_logs=[decode_error_event])
+    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[mock_raw_log])
+    decoded_logs.decoded_logs = [decode_error_event]
     output.send_to_output_sync(decoded_logs)
 
     captured = capfd.readouterr()

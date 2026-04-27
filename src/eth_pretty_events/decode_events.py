@@ -1,15 +1,13 @@
 import itertools
 import logging
 from operator import itemgetter
-from typing import Iterable, List, Optional, Sequence
+from typing import Iterable
 
 from web3 import Web3
-from web3 import types as web3types
 
 from .alchemy_utils import graphql_log_to_log_receipt
-from .event_parser import EventDefinition
 from .outputs import DecodedTxLogs
-from .types import Block, Chain, Event, Hash, Tx
+from .types import Block, Chain, Hash, Tx
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +31,7 @@ def decode_from_alchemy_input(alchemy_input: dict, chain: Chain) -> Iterable[Dec
         )
         alchemy_logs = list({log["index"]: log for log in alchemy_logs}.values())
         raw_logs = [graphql_log_to_log_receipt(alchemy_log, alchemy_block) for alchemy_log in alchemy_logs]
-        decoded_logs = decode_events_from_raw_logs(block, tx, raw_logs)
-
-        yield DecodedTxLogs(tx=tx, raw_logs=raw_logs, decoded_logs=decoded_logs)
+        yield DecodedTxLogs(tx=tx, raw_logs=raw_logs)
 
 
 def decode_events_from_tx(tx_hash: str, w3: Web3, chain: Chain) -> DecodedTxLogs:
@@ -47,26 +43,20 @@ def decode_events_from_tx(tx_hash: str, w3: Web3, chain: Chain) -> DecodedTxLogs
         timestamp=w3.eth.get_block(receipt.blockNumber).timestamp,
     )
     tx = Tx(block=block, hash=Hash(receipt.transactionHash), index=receipt.transactionIndex)
-    return DecodedTxLogs(
-        tx=tx, raw_logs=receipt.logs, decoded_logs=decode_events_from_raw_logs(block, tx, receipt.logs)
-    )
-
-
-def decode_events_from_raw_logs(block: Block, tx: Tx, logs: Sequence[web3types.LogReceipt]) -> List[Optional[Event]]:
-    return [EventDefinition.read_log(log, block=block, tx=tx) for log in logs]
+    return DecodedTxLogs(tx=tx, raw_logs=receipt.logs)
 
 
 def decode_events_from_block(block_number: int, w3: Web3, chain: Chain) -> Iterable[DecodedTxLogs]:
     w3_block = w3.eth.get_block(block_number)
     block = Block(chain=chain, number=block_number, timestamp=w3_block["timestamp"], hash=Hash(w3_block["hash"]))
 
-    for w3_tx in w3_block.transactions:
-        tx_hash = Hash(w3_tx)
-        receipt = w3.eth.get_transaction_receipt(w3_tx)
-        tx = Tx(block=block, hash=tx_hash, index=receipt.transactionIndex)
-        yield DecodedTxLogs(
-            tx=tx, raw_logs=receipt.logs, decoded_logs=decode_events_from_raw_logs(block, tx, receipt.logs)
-        )
+    tx_hashes = [str(tx) for tx in w3_block.transactions]
+    if tx_hashes:
+        batch = w3.batch_requests()
+        batch.add_mapping({w3.eth.get_transaction_receipt: tx_hashes})
+        for tx_hash, receipt in zip(tx_hashes, batch.execute()):
+            tx = Tx(block=block, hash=Hash(tx_hash), index=receipt.transactionIndex)
+            yield DecodedTxLogs(tx=tx, raw_logs=receipt.logs)
 
 
 def decode_events_from_subscription(subscription, w3: Web3, chain: Chain, block_from: int, block_to: int):
@@ -78,9 +68,7 @@ def decode_events_from_subscription(subscription, w3: Web3, chain: Chain, block_
         log_filter["topics"] = topics
 
     for block, tx, logs_for_tx in fetch_logs(w3, chain, log_filter, block_from, block_to):
-        yield DecodedTxLogs(
-            tx=tx, raw_logs=logs_for_tx, decoded_logs=decode_events_from_raw_logs(block, tx, logs_for_tx)
-        )
+        yield DecodedTxLogs(tx=tx, raw_logs=logs_for_tx)
 
 
 def fetch_logs(w3, chain: Chain, log_filter: dict, block_from: int, block_to: int):

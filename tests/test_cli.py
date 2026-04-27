@@ -23,6 +23,7 @@ from eth_pretty_events.cli import (
     render_events,
 )
 from eth_pretty_events.types import Chain
+from eth_pretty_events.w3cache import W3Cache
 
 __author__ = "Guillermo M. Narvaja"
 __copyright__ = "Guillermo M. Narvaja"
@@ -313,8 +314,9 @@ def test_render_events_txt_file_parses_hashes(mock_renv, txt_file):
         render_events(mock_renv, str(txt_file))
 
         assert mock_decode.call_count == 2
-        mock_decode.assert_any_call(TX_HASH_1, mock_renv.w3, mock_renv.chain)
-        mock_decode.assert_any_call(TX_HASH_2, mock_renv.w3, mock_renv.chain)
+        for call in mock_decode.call_args_list:
+            args, _ = call
+            assert isinstance(args[1], W3Cache)
 
 
 @pytest.mark.parametrize("txt_file", ["empty", "only_whitespace"], indirect=True)

@@ -169,7 +169,8 @@ def test_build_transaction_messages_limits(dummy_renv, template_rules, template_
 async def test_run_webhook_response(setup_output, alchemy_sample_events, mock_tx):
     output, queue, app = setup_output
     raw_logs = [{} for _ in alchemy_sample_events]  # Not used in this test, just needs to be the same length
-    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs, decoded_logs=alchemy_sample_events)
+    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs)
+    decoded_logs.decoded_logs = alchemy_sample_events
     task = asyncio.create_task(output.run(queue))
     await queue.put(decoded_logs)
     await asyncio.sleep(1)
@@ -194,7 +195,8 @@ def test_run_sync_with_valid_messages(dummy_renv, template_rules, template_loade
         with patch.dict("os.environ", {"DISCORD_URL": "https://discord.com/api/webhooks/test"}):
             output = DiscordOutput(urlparse(url), dummy_renv)
 
-            decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[], decoded_logs=alchemy_sample_events)
+            decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[])
+            decoded_logs.decoded_logs = alchemy_sample_events
 
             output.run_sync([decoded_logs])
 
@@ -249,7 +251,8 @@ async def test_run_warning_logs(
     with patch.dict("os.environ", {"DISCORD_URL": str(webhook_url)}):
         output = DiscordOutput(urlparse(url), dummy_renv)
         raw_logs = [{} for _ in alchemy_sample_events]  # Not used in this test, just needs to be the same length
-        decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs, decoded_logs=alchemy_sample_events)
+        decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs)
+        decoded_logs.decoded_logs = alchemy_sample_events
 
         with caplog.at_level("WARNING"):
             task = asyncio.create_task(output.run(queue))
@@ -287,7 +290,8 @@ async def test_run_warning_logs_400(
     with patch.dict("os.environ", {"DISCORD_URL": str(webhook_url)}):
         output = DiscordOutput(urlparse(url), dummy_renv)
         raw_logs = [{} for _ in alchemy_sample_events]
-        decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs, decoded_logs=alchemy_sample_events)
+        decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs)
+        decoded_logs.decoded_logs = alchemy_sample_events
 
         with caplog.at_level("WARNING"):
             task = asyncio.create_task(output.run(queue))
@@ -313,7 +317,8 @@ def test_run_sync_with_warning_logs(
         with patch.dict("os.environ", {"DISCORD_URL": "https://discord.com/api/webhooks/test"}):
             output = DiscordOutput(urlparse(url), dummy_renv)
             raw_logs = [{} for _ in alchemy_sample_events]  # Not used in this test, just needs to be the same length
-            decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs, decoded_logs=alchemy_sample_events)
+            decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs)
+            decoded_logs.decoded_logs = alchemy_sample_events
 
             with caplog.at_level("WARNING"):
                 output.run_sync([decoded_logs])
@@ -335,7 +340,8 @@ def test_run_sync_with_warning_logs_400(
         with patch.dict("os.environ", {"DISCORD_URL": "https://discord.com/api/webhooks/test"}):
             output = DiscordOutput(urlparse(url), dummy_renv)
             raw_logs = [{} for _ in alchemy_sample_events]
-            decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs, decoded_logs=alchemy_sample_events)
+            decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=raw_logs)
+            decoded_logs.decoded_logs = alchemy_sample_events
 
             with caplog.at_level("WARNING"):
                 output.run_sync([decoded_logs])
@@ -355,7 +361,7 @@ def test_build_transaction_messages_none_events(dummy_renv, mock_tx):
 async def test_send_to_output_sync_not_implemented(setup_output, mock_tx):
     output, queue, _ = setup_output
 
-    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[], decoded_logs=[])
+    decoded_logs = DecodedTxLogs(tx=mock_tx, raw_logs=[])
 
     await queue.put(decoded_logs)
     with pytest.raises(NotImplementedError):

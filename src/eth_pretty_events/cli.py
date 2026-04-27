@@ -28,7 +28,7 @@ try:
     from . import pubsub  # noqa - To load the pubsub output
 except ImportError:
     pass
-from . import __version__, address_book, decode_events, render
+from . import __version__, address_book, decode_events, render, w3cache
 from .block_tree import BlockTree
 from .event_filter import TemplateRule, read_template_rules
 from .event_parser import EventDefinition
@@ -230,8 +230,7 @@ async def parse_raw_events(
             tx_logs = list(tx_logs)
             tx_logs = list({log["logIndex"]: log for log in tx_logs}.values())
             tx = Tx(Hash(tx_hash), tx_logs[0]["transactionIndex"], block)
-            decoded_events = list(decode_events.decode_events_from_raw_logs(block, tx, tx_logs))
-            decoded_log = DecodedTxLogs(tx, tx_logs, decoded_events)
+            decoded_log = DecodedTxLogs(tx, tx_logs)
             for queue in processed_logs:
                 await queue.put(decoded_log)
         raw_logs.task_done()
@@ -322,20 +321,17 @@ def merge_decoded_logs(same_tx_group: Iterable[DecodedTxLogs]) -> DecodedTxLogs:
         raise ValueError("merge_decoded_logs() received an empty group")
 
     base = tx_logs_list[0]
-    by_log_index: dict[int, tuple[object, object]] = {}
+    by_log_index: dict[int, web3types.LogReceipt] = {}
 
     for tx_logs in tx_logs_list:
-        if len(tx_logs.raw_logs) != len(tx_logs.decoded_logs):
-            raise ValueError("raw_logs and decoded_logs must have the same length")
-        for raw, dec in zip(tx_logs.raw_logs, tx_logs.decoded_logs):
+        for raw in tx_logs.raw_logs:
             idx = raw["logIndex"]
-            by_log_index.setdefault(idx, (raw, dec))
+            by_log_index.setdefault(idx, raw)
 
     ordered = [by_log_index[i] for i in sorted(by_log_index)]
     if ordered:
-        raw, dec = zip(*ordered)
-        return DecodedTxLogs(tx=base.tx, raw_logs=list(raw), decoded_logs=list(dec))
-    return DecodedTxLogs(tx=base.tx, raw_logs=[], decoded_logs=[])
+        return DecodedTxLogs(tx=base.tx, raw_logs=list(ordered))
+    return DecodedTxLogs(tx=base.tx, raw_logs=[])
 
 
 def _consolidate_logs(decoded_logs_for_sub: Iterable[Iterable[DecodedTxLogs]]) -> Iterator[DecodedTxLogs]:
@@ -395,10 +391,12 @@ def render_events(renv: RenderingEnv, input: str):
         if renv.w3 is None:
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")
         with open(input) as f:
-            tx_hashes = (line.strip() for line in f if line.strip())
-            decoded_tx_logs = [
-                decode_events.decode_events_from_tx(tx_hash, renv.w3, renv.chain) for tx_hash in tx_hashes
-            ]
+            tx_hashes = [line.strip() for line in f if line.strip()]
+        w3cache_instance = w3cache.W3Cache(renv.w3)
+        w3cache_instance.preload_receipts(tx_hashes)
+        decoded_tx_logs = [
+            decode_events.decode_events_from_tx(tx_hash, w3cache_instance, renv.chain) for tx_hash in tx_hashes
+        ]
     elif input.isdigit():
         if renv.w3 is None:
             raise argparse.ArgumentTypeError("Missing --rpc-url parameter")

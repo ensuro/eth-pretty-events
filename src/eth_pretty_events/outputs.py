@@ -2,11 +2,13 @@ import asyncio
 import pprint
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Iterable, List, Optional
 from urllib.parse import ParseResult, parse_qs, urlparse
 
 from web3 import types as web3types
 
+from .event_parser import EventDefinition
 from .types import Event, Tx
 
 
@@ -14,7 +16,10 @@ from .types import Event, Tx
 class DecodedTxLogs:
     tx: Tx
     raw_logs: List[web3types.LogReceipt]
-    decoded_logs: List[Optional[Event]]
+
+    @cached_property
+    def decoded_logs(self) -> List[Optional[Event]]:
+        return [EventDefinition.read_log(log, block=self.tx.block, tx=self.tx) for log in self.raw_logs]
 
 
 class OutputBase(ABC):
