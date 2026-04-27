@@ -16,9 +16,6 @@ class W3Cache:
     def eth(self) -> "W3Cache":
         return self
 
-    def is_connected(self) -> bool:
-        return self._w3.is_connected
-
     def get_transaction_receipt(self, tx_hash: str) -> web3types.TxReceipt:
         tx_hash = tx_hash.lower()
         if tx_hash in self._receipt_cache:
