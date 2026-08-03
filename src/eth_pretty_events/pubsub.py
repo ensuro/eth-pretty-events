@@ -14,6 +14,7 @@ _logger = logging.getLogger(__name__)
 class PubSubOutputBase(OutputBase):
     def __init__(self, url: ParseResult, renv):
         super().__init__(url)
+        self.renv = renv
 
         query_params = parse_qs(url.query)
         self.dry_run = query_params.get("dry_run", ["false"])[0].lower() == "true"
@@ -32,9 +33,20 @@ class PubSubOutputBase(OutputBase):
             self.publisher = pubsub_v1.PublisherClient()
             self.topic_path = self.publisher.topic_path(self.project_id, self.topic)
 
-    def publish_message(self, message):
+    def _matching_tags(self, log: DecodedTxLogs) -> set:
+        """Tags (from renv.template_rules) of every rule that matches at least one
+        decoded event in this tx - regardless of this output's own `tags=` config, so
+        that a single publish can carry all of them as attributes and let each Pub/Sub
+        subscription filter for the ones it cares about."""
+        matched = set()
+        for rule in (x for x in self.renv.template_rules if x.tags):
+            if any(event is not None and rule.match.filter(event) for event in log.decoded_logs):
+                matched.update(rule.tags)
+        return matched
+
+    def publish_message(self, message, attributes: dict = None):
         formatted_message = json.dumps(message, cls=Web3JsonEncoder)
-        publish = self.publisher.publish(self.topic_path, formatted_message.encode("utf-8"))
+        publish = self.publisher.publish(self.topic_path, formatted_message.encode("utf-8"), **(attributes or {}))
         message_id = publish.result()
         _logger.info(f"Published message to Pub/Sub with ID: {message_id}")
 
@@ -59,7 +71,8 @@ class PubSubRawLogsOutput(PubSubOutputBase):
                 for raw_log in log.raw_logs
             ],
         }
-        self.publish_message(message)
+        attributes = {f"tag_{tag}": "true" for tag in self._matching_tags(log)}
+        self.publish_message(message, attributes=attributes)
 
 
 @OutputBase.register("pubsubdecodedlogs")
@@ -84,7 +97,8 @@ class PubSubDecodedLogsOutput(PubSubOutputBase):
                 if decoded_log and not isinstance(decoded_log, DecodeEventError)
             ],
         }
-        self.publish_message(message)
+        attributes = {f"tag_{tag}": "true" for tag in self._matching_tags(log)}
+        self.publish_message(message, attributes=attributes)
 
 
 class PrintToScreenPublisher:
@@ -92,8 +106,10 @@ class PrintToScreenPublisher:
         self.project_id = project_id
         self.topic = topic
 
-    def publish(self, topic_path, message):
+    def publish(self, topic_path, message, **attributes):
         _logger.info(f"[Dry Run] Publishing to {topic_path}:")
+        if attributes:
+            _logger.info(f"Attributes: {attributes}")
         if isinstance(message, bytes):
             try:
                 decoded_message = json.loads(message.decode("utf-8"))

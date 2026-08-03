@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 
 import pytest
 
+from eth_pretty_events.event_filter import EventFilter, TemplateRule
 from eth_pretty_events.outputs import DecodedTxLogs
 from eth_pretty_events.pubsub import (
     PrintToScreenPublisher,
@@ -38,7 +39,89 @@ def dummy_queue():
 
 @pytest.fixture
 def dummy_renv():
-    return MagicMock()
+    renv = MagicMock()
+    renv.template_rules = []
+    return renv
+
+
+def _renv_with_rules(rules):
+    renv = MagicMock()
+    renv.template_rules = rules
+    return renv
+
+
+def _log_with_event(event_name):
+    tx = Tx(
+        hash=Hash("0x4c0883a6910395bae0f94c2e1d2c37bd2e8d6c5797b7c3f8d36dd05e5f13606f"),
+        index=0,
+        block=Block(
+            hash=Hash("0x5d7c5e1ce2f3410de4c99f172ddfcb087a821440134d25e7ab8353ce57e770cc"),
+            timestamp=1635600000,
+            number=123456,
+            chain=Chain(id=1, name="Ethereum Mainnet"),
+        ),
+    )
+    log = DecodedTxLogs(tx=tx, raw_logs=[])
+    log.decoded_logs = [
+        Event(address="0x742d35cc6634c0532925a3b844bc454e4438f44e", args=None, tx=None, name=event_name, log_index=0)
+    ]
+    return log
+
+
+def test_pubsub_output_tags_of_matching_rules_become_attributes(mock_future):
+    renv = _renv_with_rules(
+        [
+            TemplateRule(template="x", match=EventFilter.from_config({"name": "Transfer"}), tags=["ETKActivity"]),
+            TemplateRule(template="y", match=EventFilter.from_config({"name": "Transfer"}), tags=["LPActivity"]),
+            TemplateRule(template="z", match=EventFilter.from_config({"name": "Approval"}), tags=["Unrelated"]),
+        ]
+    )
+    url = urlparse("pubsubrawlogs://?project_id=test_project&topic=test_topic&dry_run=false")
+
+    with patch("eth_pretty_events.pubsub.pubsub_v1.PublisherClient") as mock_publisher:
+        mock_publisher_instance = mock_publisher.return_value
+        mock_publisher_instance.topic_path.return_value = "projects/test_project/topics/test_topic"
+        mock_publisher_instance.publish.return_value = mock_future()
+        output = PubSubRawLogsOutput(url, renv)
+
+        asyncio.run(output.send_to_output(_log_with_event("Transfer")))
+
+        _, kwargs = mock_publisher_instance.publish.call_args
+        assert kwargs == {"tag_ETKActivity": "true", "tag_LPActivity": "true"}
+
+
+def test_pubsub_output_no_matching_rule_publishes_without_attributes(mock_future):
+    renv = _renv_with_rules(
+        [TemplateRule(template="z", match=EventFilter.from_config({"name": "Approval"}), tags=["Unrelated"])]
+    )
+    url = urlparse("pubsubrawlogs://?project_id=test_project&topic=test_topic&dry_run=false")
+
+    with patch("eth_pretty_events.pubsub.pubsub_v1.PublisherClient") as mock_publisher:
+        mock_publisher_instance = mock_publisher.return_value
+        mock_publisher_instance.topic_path.return_value = "projects/test_project/topics/test_topic"
+        mock_publisher_instance.publish.return_value = mock_future()
+        output = PubSubRawLogsOutput(url, renv)
+
+        asyncio.run(output.send_to_output(_log_with_event("Transfer")))
+
+        _, kwargs = mock_publisher_instance.publish.call_args
+        assert kwargs == {}
+
+
+def test_pubsub_output_ignores_matching_rules_without_tags(mock_future):
+    renv = _renv_with_rules([TemplateRule(template="z", match=EventFilter.from_config({"name": "Transfer"}), tags=[])])
+    url = urlparse("pubsubrawlogs://?project_id=test_project&topic=test_topic&dry_run=false")
+
+    with patch("eth_pretty_events.pubsub.pubsub_v1.PublisherClient") as mock_publisher:
+        mock_publisher_instance = mock_publisher.return_value
+        mock_publisher_instance.topic_path.return_value = "projects/test_project/topics/test_topic"
+        mock_publisher_instance.publish.return_value = mock_future()
+        output = PubSubRawLogsOutput(url, renv)
+
+        asyncio.run(output.send_to_output(_log_with_event("Transfer")))
+
+        _, kwargs = mock_publisher_instance.publish.call_args
+        assert kwargs == {}
 
 
 def test_pubsub_output_base_missing_project_id_or_topic(dummy_renv):
