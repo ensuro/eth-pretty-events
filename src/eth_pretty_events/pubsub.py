@@ -39,9 +39,7 @@ class PubSubOutputBase(OutputBase):
         that a single publish can carry all of them as attributes and let each Pub/Sub
         subscription filter for the ones it cares about."""
         matched = set()
-        for rule in self.renv.template_rules:
-            if not rule.tags:
-                continue
+        for rule in (x for x in self.renv.template_rules if x.tags):
             if any(event is not None and rule.match.filter(event) for event in log.decoded_logs):
                 matched.update(rule.tags)
         return matched
